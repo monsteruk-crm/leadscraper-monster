@@ -34,14 +34,14 @@ _pool: Optional[asyncpg.Pool] = None
 
 async def get_pool() -> asyncpg.Pool:
     global _pool
-    if _pool is None:
-        # statement_cache_size=0 prevents stale prepared-statement errors
-        # after DDL changes (e.g. Reset DB or table recreation).
+    # Recreate if pool was never created or has been closed (e.g. after
+    # reset_db() or a vercel dev hot-reload that closed the old process).
+    if _pool is None or getattr(_pool, '_closed', False):
         _pool = await asyncpg.create_pool(
             cfg.DATABASE_URL,
             min_size=1,
             max_size=5,
-            statement_cache_size=0,
+            statement_cache_size=0,  # prevents stale plans after DDL changes
         )
     return _pool
 
@@ -59,17 +59,17 @@ async def _close_pool() -> None:
 
 @asynccontextmanager
 async def get_conn():
-    """Yield a connection, recreating the pool once on any interface error."""
+    """Yield a DB connection.  On interface/OS errors, closes the pool so
+    the *next* request gets a fresh one (we do not retry the current request
+    to avoid double-yield issues with asynccontextmanager)."""
+    pool = await get_pool()
     try:
-        pool = await get_pool()
         async with pool.acquire() as conn:
             yield conn
     except (asyncpg.InterfaceError, OSError) as exc:
-        logger.warning("Pool error (%s) — recreating pool and retrying.", exc)
+        logger.warning("Connection error (%s) — pool closed; next request will reconnect.", exc)
         await _close_pool()
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            yield conn
+        raise
 
 
 # ── Schema bootstrap ─────────────────────────────────────────────────────────
