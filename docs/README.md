@@ -15,3 +15,4 @@ B2B lead scraping SaaS deployed on Vercel (Python/FastAPI) with a PostgreSQL bac
 - [001 — Vercel + FastAPI deployment](adr/001-vercel-fastapi-deployment.md)
 - [002 — PostgreSQL + asyncpg persistence](adr/002-postgres-asyncpg.md)
 - [003 — Lead data quality fields](adr/003-lead-data-quality-fields.md)
+- [004 — asyncpg connection pool reliability](adr/004-connection-pool-reliability.md)
