@@ -47,6 +47,7 @@ def parse_lead_info(html: str, source_url: str) -> Optional[Lead]:
         email = _extract_email_from_links(soup)
         phone = _extract_phone_from_links(soup)
         first_name, last_name = _extract_name_from_schema(soup)
+        city, country = _extract_location_from_html(soup)
 
         # ── Step 2: strip noise; get plain text ───────────────────────────────
         _remove_noise(soup)
@@ -84,6 +85,8 @@ def parse_lead_info(html: str, source_url: str) -> Optional[Lead]:
             contact_name=contact_name,
             first_name=first_name,
             last_name=last_name,
+            city=city,
+            country=country,
         )
     except Exception as exc:
         logger.debug("parse_lead_info failed for %s: %s", source_url, exc)
@@ -115,6 +118,54 @@ def _extract_phone_from_links(soup: BeautifulSoup) -> str:
         if len(digits) >= 7:
             return raw
     return ""
+
+
+def _extract_location_from_html(soup: BeautifulSoup) -> tuple[str, str]:
+    """Return (city, country) from schema.org JSON-LD, microdata, or meta tags."""
+    import json as _json
+
+    # 1. JSON-LD — look for Organization or LocalBusiness with address
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = _json.loads(script.string or "")
+            # handle @graph arrays
+            nodes = data if isinstance(data, list) else [data]
+            nodes += data.get("@graph", []) if isinstance(data, dict) else []
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                addr = node.get("address") or {}
+                if isinstance(addr, str):
+                    continue
+                city = addr.get("addressLocality", "")
+                raw_country = addr.get("addressCountry", "")
+                # addressCountry may be an ISO code or a full name
+                country = raw_country if isinstance(raw_country, str) else ""
+                if city or country:
+                    return city.strip(), country.strip()
+        except Exception:
+            pass
+
+    # 2. Microdata — itemprop="addressLocality" / "addressCountry"
+    city_el = soup.find(attrs={"itemprop": "addressLocality"})
+    country_el = soup.find(attrs={"itemprop": "addressCountry"})
+    city = (city_el.get_text(strip=True) if city_el else "")
+    country = (country_el.get_text(strip=True) if country_el else "")
+    if city or country:
+        return city, country
+
+    # 3. Meta tags
+    for name, attr in (("geo.placename", "city"), ("geo.region", "country")):
+        tag = soup.find("meta", attrs={"name": name})
+        if tag and tag.get("content"):
+            if attr == "city":
+                city = tag["content"].strip()
+            else:
+                country = tag["content"].strip()
+    if city or country:
+        return city, country
+
+    return "", ""
 
 
 def _extract_name_from_schema(soup: BeautifulSoup) -> tuple[str, str]:

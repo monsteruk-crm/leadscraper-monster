@@ -123,6 +123,6 @@ All events are `data: <JSON>\n\n` lines on the `/api/scrape` stream.
 | `type` | Key fields | Notes |
 |---|---|---|
 | `progress` | `msg`, `phase` | Status updates (searching, fetching) |
-| `lead` | `company_name`, `first_name`, `last_name`, `email`, `phone`, `website`, `category`, `confidence`, `country`, `city` | One event per new lead |
+| `lead` | `company_name`, `first_name`, `last_name`, `email`, `phone`, `website`, `category`, `confidence`, `country`, `city` | One event per new lead (city/country pre-filled by HTML parser if schema.org data present) |
 | `done` | `leads_new`, `leads_duplicate`, `leads_discarded`, `pages_visited` | Final summary |
 | `error` | `content` | Pipeline or DB error |
