@@ -107,6 +107,20 @@ def _json_serial(obj):
     raise TypeError(f"Type {type(obj)} not serialisable")
 
 
+async def _resolve_session(session_id: Optional[int]) -> int:
+    """Return a valid session id, creating one if the requested id is gone."""
+    if session_id is not None:
+        existing = await db.get_session(session_id)
+        if existing:
+            return session_id
+        # Session doesn't exist (e.g. after DB reset) — fall through
+    latest = await db.get_latest_session()
+    if latest and db.should_resume(latest):
+        return latest["id"]
+    s = await db.create_session()
+    return s["id"]
+
+
 # ── Health ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
@@ -198,14 +212,7 @@ async def chat(body: ChatRequest):
     if not cfg.OPENAI_API_KEY:
         raise HTTPException(503, detail="OPENAI_API_KEY not configured.")
 
-    session_id = body.session_id
-    if session_id is None:
-        latest = await db.get_latest_session()
-        if latest and db.should_resume(latest):
-            session_id = latest["id"]
-        else:
-            s = await db.create_session()
-            session_id = s["id"]
+    session_id = await _resolve_session(body.session_id)
 
     turns = await db.get_turns(session_id)
     await db.add_turn(session_id, "user", body.message, "chat")
@@ -258,14 +265,7 @@ async def scrape(body: ScrapeRequest):
     if body.target_new_leads:
         cfg.TARGET_NEW_LEADS = body.target_new_leads
 
-    session_id = body.session_id
-    if session_id is None:
-        latest = await db.get_latest_session()
-        if latest and db.should_resume(latest):
-            session_id = latest["id"]
-        else:
-            s = await db.create_session()
-            session_id = s["id"]
+    session_id = await _resolve_session(body.session_id)
 
     keywords = body.keywords
 
