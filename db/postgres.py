@@ -124,13 +124,44 @@ CREATE TABLE IF NOT EXISTS settings (
     CONSTRAINT settings_singleton CHECK (id = 1)
 );
 
--- Ensure the settings row always exists
-INSERT INTO settings (id) VALUES (1) ON CONFLICT DO NOTHING;
+-- Ensure the settings row exists (do not overwrite user-saved values on re-init)
+INSERT INTO settings (
+    id, keywords, max_pages, target_new_leads,
+    request_delay_seconds, ai_enrichment_enabled, ai_confidence_threshold
+) VALUES (
+    1,
+    '["sustainable packaging suppliers UK",
+      "eco packaging manufacturer UK",
+      "B2B packaging solutions England",
+      "green packaging company UK"]',
+    3, 0, 1.5, true, 0.3
+) ON CONFLICT DO NOTHING;
 """
 
 
 _DROP_DDL = """
 DROP TABLE IF EXISTS chat_turns, leads, visited_urls, search_runs, settings, sessions CASCADE;
+"""
+
+# After a full reset we always restore settings to a clean seed (UPSERT).
+_SEED_SETTINGS = """
+INSERT INTO settings (
+    id, keywords, max_pages, target_new_leads,
+    request_delay_seconds, ai_enrichment_enabled, ai_confidence_threshold
+) VALUES (
+    1,
+    '["sustainable packaging suppliers UK",
+      "eco packaging manufacturer UK",
+      "B2B packaging solutions England",
+      "green packaging company UK"]',
+    3, 0, 1.5, true, 0.3
+) ON CONFLICT (id) DO UPDATE SET
+    keywords                = EXCLUDED.keywords,
+    max_pages               = EXCLUDED.max_pages,
+    target_new_leads        = EXCLUDED.target_new_leads,
+    request_delay_seconds   = EXCLUDED.request_delay_seconds,
+    ai_enrichment_enabled   = EXCLUDED.ai_enrichment_enabled,
+    ai_confidence_threshold = EXCLUDED.ai_confidence_threshold;
 """
 
 
@@ -142,10 +173,11 @@ async def init_db() -> None:
 
 
 async def reset_db() -> None:
-    """Drop all tables then recreate from scratch.  Wipes all data."""
+    """Drop all tables, recreate from scratch, and restore seed settings."""
     async with get_conn() as conn:
         await conn.execute(_DROP_DDL)
         await conn.execute(_DDL)
+        await conn.execute(_SEED_SETTINGS)
     logger.info("Database reset and schema recreated.")
 
 
@@ -173,7 +205,7 @@ async def save_settings(s: dict[str, Any]) -> None:
                 ai_confidence_threshold = $6
             WHERE id = 1
         """,
-            json.dumps(s.get("keywords", ["sustainable packaging suppliers UK"])),
+            json.dumps(s.get("keywords", _default_settings()["keywords"])),
             int(s.get("max_pages", 3)),
             int(s.get("target_new_leads", 0)),
             float(s.get("request_delay_seconds", 1.5)),
@@ -184,12 +216,17 @@ async def save_settings(s: dict[str, Any]) -> None:
 
 def _default_settings() -> dict[str, Any]:
     return {
-        "keywords": ["sustainable packaging suppliers UK"],
+        "keywords": [
+            "sustainable packaging suppliers UK",
+            "eco packaging manufacturer UK",
+            "B2B packaging solutions England",
+            "green packaging company UK",
+        ],
         "max_pages": 3,
         "target_new_leads": 0,
         "request_delay_seconds": 1.5,
         "ai_enrichment_enabled": True,
-        "ai_confidence_threshold": 0.0,
+        "ai_confidence_threshold": 0.3,
     }
 
 

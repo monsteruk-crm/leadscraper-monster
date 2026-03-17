@@ -13,7 +13,12 @@ OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 # ── Search ───────────────────────────────────────────────────────────────────
-SEARCH_KEYWORDS: list[str] = ["sustainable packaging suppliers UK"]
+SEARCH_KEYWORDS: list[str] = [
+    "sustainable packaging suppliers UK",
+    "eco packaging manufacturer UK",
+    "B2B packaging solutions England",
+    "green packaging company UK",
+]
 MAX_PAGES: int = 3
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
@@ -23,7 +28,7 @@ REQUEST_TIMEOUT_SECONDS: int = 15
 
 # ── AI Enrichment ─────────────────────────────────────────────────────────────
 AI_ENRICHMENT_ENABLED: bool = True
-AI_CONFIDENCE_THRESHOLD: float = 0.0
+AI_CONFIDENCE_THRESHOLD: float = 0.3
 
 # ── Search goals ──────────────────────────────────────────────────────────────
 TARGET_NEW_LEADS: int = 0

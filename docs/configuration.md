@@ -18,12 +18,12 @@ These are persisted in the `settings` table (single row, `id=1`) and can be chan
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
-| `keywords` | list[str] | `["sustainable packaging suppliers UK"]` | Default keyword list used when `/scrape` is run without arguments |
+| `keywords` | list[str] | 4 seed keywords (sustainable/eco packaging UK) | Default keyword list used when `/scrape` is run without arguments |
 | `max_pages` | int | `3` | Maximum DuckDuckGo result pages to fetch per keyword |
 | `target_new_leads` | int | `0` | Stop early when this many new leads are found; `0` = no limit |
 | `request_delay_seconds` | float | `1.5` | Seconds to wait between HTTP requests (politeness) |
 | `ai_enrichment_enabled` | bool | `true` | Toggle OpenAI enrichment on/off |
-| `ai_confidence_threshold` | float | `0.0` | Discard leads with confidence below this value (0.0 = keep all) |
+| `ai_confidence_threshold` | float | `0.3` | Discard leads with confidence below this value (0.0 = keep all) |
 
 DB settings are loaded at the start of every scrape run via `db.apply_settings_to_config()`, overriding the module-level defaults in `config/config.py`.
 
