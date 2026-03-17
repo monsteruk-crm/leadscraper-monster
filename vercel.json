@@ -1,5 +1,15 @@
 {
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
-  ]
+  ],
+    "experimentalServices": {
+    "frontend": {
+      "entrypoint": "frontend",
+      "routePrefix": "/frontend"
+    },
+    "web": {
+      "entrypoint": "main.py",
+      "routePrefix": "/"
+    }
+  }
 }
