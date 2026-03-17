@@ -130,6 +130,16 @@ async def db_init():
         raise HTTPException(500, detail=str(exc))
 
 
+@app.post("/api/db/reset")
+async def db_reset():
+    """Drop all tables and recreate from scratch.  Wipes all data."""
+    try:
+        await db.reset_db()
+        return {"status": "ok", "message": "Database wiped and schema recreated."}
+    except Exception as exc:
+        raise HTTPException(500, detail=str(exc))
+
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/config")
@@ -503,6 +513,7 @@ tbody td{padding:.4rem .75rem;color:var(--text);max-width:220px;overflow:hidden;
     <button class="btn" onclick="exportLeads()">Export CSV</button>
     <button class="btn" onclick="openSettingsModal()">Settings</button>
     <button class="btn" onclick="openDbInitModal()">Init DB</button>
+    <button class="btn" style="color:var(--red)" onclick="openDbResetModal()">Reset DB</button>
   </div>
 </header>
 <div class="layout">
@@ -554,7 +565,8 @@ tbody td{padding:.4rem .75rem;color:var(--text);max-width:220px;overflow:hidden;
   <div class="leads-table-wrap">
     <table>
       <thead><tr>
-        <th>Company</th><th>Email</th><th>Category</th>
+        <th>Company</th><th>First</th><th>Last</th><th>Title</th>
+        <th>Email</th><th>Phone</th><th>Category</th>
         <th>Country</th><th>Conf</th><th>Status</th><th></th>
       </tr></thead>
       <tbody id="leads-tbody"></tbody>
@@ -612,6 +624,16 @@ tbody td{padding:.4rem .75rem;color:var(--text);max-width:220px;overflow:hidden;
     </div>
   </div>
 </div>
+<div class="modal-overlay" id="db-reset-modal">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3 style="color:var(--red)">⚠ Reset Database</h3>
+    <p style="font-size:.875rem;color:var(--text2)">Drops ALL tables and recreates the schema. Every lead, session and run will be permanently deleted.</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('db-reset-modal').classList.remove('open')">Cancel</button>
+      <button class="btn" style="background:var(--red);border-color:var(--red);color:#fff" onclick="runDbReset()">Wipe &amp; Reset</button>
+    </div>
+  </div>
+</div>
 <div class="modal-overlay" id="session-modal" onclick="closeSessionModal()">
   <div class="modal" onclick="event.stopPropagation()">
     <h3>Sessions</h3>
@@ -640,13 +662,15 @@ function closeSettingsModal(){document.getElementById('settings-modal').classLis
 async function saveSettings(){const keywords=document.getElementById('cfg-keywords').value.split('\\n').map(k=>k.trim()).filter(Boolean);const body={keywords,max_pages:parseInt(document.getElementById('cfg-max-pages').value)||3,target_new_leads:parseInt(document.getElementById('cfg-target').value)||0,request_delay_seconds:parseFloat(document.getElementById('cfg-delay').value)||1.5,ai_confidence_threshold:parseFloat(document.getElementById('cfg-conf').value)||0,ai_enrichment_enabled:document.getElementById('cfg-ai').checked};try{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(r.ok){appendSystem('Settings saved.');closeSettingsModal();}else{appendSystem('Failed: '+await r.text());}}catch(e){appendSystem('Error: '+e);}}
 function openDbInitModal(){document.getElementById('db-init-modal').classList.add('open');}
 async function runDbInit(){document.getElementById('db-init-modal').classList.remove('open');appendSystem('Initialising database schema...');try{const r=await fetch('/api/db/init',{method:'POST'});const d=await r.json();appendSystem(d.message||'Done.');await loadStats();}catch(e){appendSystem('Error: '+e);}}
+function openDbResetModal(){document.getElementById('db-reset-modal').classList.add('open');}
+async function runDbReset(){document.getElementById('db-reset-modal').classList.remove('open');appendSystem('Resetting database — dropping all tables...');try{const r=await fetch('/api/db/reset',{method:'POST'});const d=await r.json();appendSystem(d.message||'Done.');await loadStats();}catch(e){appendSystem('Error: '+e);}}
 async function openSessionModal(){const r=await fetch('/api/sessions');const sessions=await r.json();const list=document.getElementById('session-modal-list');list.innerHTML='';sessions.forEach(s=>{const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:.5rem;padding:.35rem .5rem;border-radius:6px;cursor:pointer';row.innerHTML='<span style="flex:1;font-size:.82rem">#'+s.id+' '+esc(s.name)+' <small style="color:#666">'+(s.updated_at||'').substring(0,10)+' - '+s.turn_count+' turns</small></span>';row.onclick=()=>{setSession(s.id,s.name);closeSessionModal();};row.onmouseenter=()=>row.style.background='var(--bg3)';row.onmouseleave=()=>row.style.background='';list.appendChild(row);});document.getElementById('session-modal').classList.add('open');}
 function closeSessionModal(){document.getElementById('session-modal').classList.remove('open');}
 async function createNewSession(){const name=document.getElementById('new-session-name').value.trim()||undefined;const body=name?JSON.stringify({name}):'{}';const r=await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body});const sess=await r.json();await setSession(sess.id,sess.name);await loadSessions();closeSessionModal();appendSystem('New session #'+sess.id+' "'+sess.name+'" started.');}
 async function newSession(){const r=await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const sess=await r.json();await setSession(sess.id,sess.name);await loadSessions();appendSystem('New session #'+sess.id+' "'+sess.name+'" started.');}
 function openLeadsDrawer(){document.getElementById('leads-drawer').classList.add('open');document.getElementById('drawer-overlay').classList.add('open');loadLeads();}
 function closeLeadsDrawer(){document.getElementById('leads-drawer').classList.remove('open');document.getElementById('drawer-overlay').classList.remove('open');}
-async function loadLeads(page){if(page)leadsPage=page;const q=new URLSearchParams({page:leadsPage,page_size:50,search:leadsSearch});const r=await fetch('/api/leads?'+q);const data=await r.json();leadsTotal=data.total;document.getElementById('leads-total-label').textContent=data.total+' leads';const tbody=document.getElementById('leads-tbody');tbody.innerHTML='';(data.leads||[]).forEach(lead=>{const conf=lead.confidence||0;const badge=conf>=0.7?'conf-high':conf>=0.4?'conf-mid':'conf-low';const tr=document.createElement('tr');tr.innerHTML='<td title="'+esc(lead.company_name)+'">'+esc(lead.company_name||'-')+'</td><td title="'+esc(lead.email)+'">'+esc(lead.email||'-')+'</td><td>'+esc(lead.category||'-')+'</td><td>'+esc(lead.country||'-')+'</td><td><span class="conf-badge '+badge+'">'+conf.toFixed(2)+'</span></td><td>'+esc(lead.status||'New')+'</td><td><button class="btn" onclick="archiveLead('+lead.id+','+(!lead.archived)+')">'+((lead.archived)?'Restore':'Archive')+'</button></td>';tbody.appendChild(tr);});renderPagination(data.total,data.page_size);}
+async function loadLeads(page){if(page)leadsPage=page;const q=new URLSearchParams({page:leadsPage,page_size:50,search:leadsSearch});const r=await fetch('/api/leads?'+q);const data=await r.json();leadsTotal=data.total;document.getElementById('leads-total-label').textContent=data.total+' leads';const tbody=document.getElementById('leads-tbody');tbody.innerHTML='';(data.leads||[]).forEach(lead=>{const conf=lead.confidence||0;const badge=conf>=0.7?'conf-high':conf>=0.4?'conf-mid':'conf-low';const tr=document.createElement('tr');tr.innerHTML=\'<td title="\'+esc(lead.company_name)+\'">\'+esc(lead.company_name||\'-\')+\'</td><td>\'+esc(lead.first_name||\'-\')+\'</td><td>\'+esc(lead.last_name||\'-\')+\'</td><td>\'+esc(lead.title||\'-\')+\'</td><td title="\'+esc(lead.email)+\'">\'+esc(lead.email||\'-\')+\'</td><td>\'+esc(lead.phone||\'-\')+\'</td><td>\'+esc(lead.category||\'-\')+\'</td><td>\'+esc(lead.country||\'-\')+\'</td><td><span class="conf-badge \'+badge+\'">\'+conf.toFixed(2)+\'</span></td><td>\'+esc(lead.status||\'New\')+\'</td><td><button class="btn" onclick="archiveLead(\'+lead.id+\',\'+(!lead.archived)+\')">\'+((lead.archived)?\'Restore\':\'Archive\')+\'</button></td>\';tbody.appendChild(tr);});renderPagination(data.total,data.page_size);}
 function renderPagination(total,pageSize){const pages=Math.ceil(total/pageSize);const pg=document.getElementById('leads-pagination');pg.innerHTML='';for(let i=1;i<=Math.min(pages,10);i++){const btn=document.createElement('button');btn.className='page-btn'+(i===leadsPage?' active':'');btn.textContent=i;btn.onclick=()=>loadLeads(i);pg.appendChild(btn);}}
 function debounceLeadSearch(){clearTimeout(searchDebounce);searchDebounce=setTimeout(()=>{leadsSearch=document.getElementById('leads-search').value;leadsPage=1;loadLeads();},300);}
 async function archiveLead(id,archived){await fetch('/api/leads/'+id+'/archive?archived='+archived,{method:'PATCH'});loadLeads();loadStats();}

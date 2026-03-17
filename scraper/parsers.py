@@ -27,49 +27,130 @@ _PHONE_RE = re.compile(
 )
 _PERSON_NAME_RE = re.compile(r"\b([A-Z][a-z]+ [A-Z][a-z]+)\b")
 
+# Email domains that indicate generic/no-reply addresses — deprioritised
+_NOREPLY_PREFIXES = ("noreply", "no-reply", "donotreply", "mailer", "info@",
+                     "hello@", "contact@", "support@", "admin@", "enquiries@")
+
 
 def parse_lead_info(html: str, source_url: str) -> Optional[Lead]:
     """Extract a Lead from a raw HTML page.
 
-    Returns None if the page does not look like a company website
-    (e.g. social-network profiles, aggregators, plain news articles).
+    Scans `mailto:` / `tel:` links BEFORE stripping noise elements because
+    contact details are very commonly placed in footers and headers.
 
-    Args:
-        html:       Raw HTML string.
-        source_url: The URL the HTML was fetched from.
-
-    Returns:
-        A partially- or fully-populated Lead, or None.
+    Returns None if the page does not look like a company website.
     """
     try:
         soup = BeautifulSoup(html, "lxml")
+
+        # ── Step 1: harvest contact links from the full DOM ───────────────────
+        email = _extract_email_from_links(soup)
+        phone = _extract_phone_from_links(soup)
+        first_name, last_name = _extract_name_from_schema(soup)
+
+        # ── Step 2: strip noise; get plain text ───────────────────────────────
         _remove_noise(soup)
         text = soup.get_text(separator=" ", strip=True)
 
+        # ── Step 3: text-regex fallbacks ──────────────────────────────────────
+        if not email:
+            email = _best_email_from_text(text)
+        if not phone:
+            phone = _first_match(_PHONE_RE, text)
+
+        # ── Step 4: company name (required) ───────────────────────────────────
         company_name = _extract_company_name(soup)
         if not company_name:
             logger.debug("No company name found — skipping %s", source_url)
             return None
 
+        # ── Step 5: contact name fallback ─────────────────────────────────────
+        if not (first_name or last_name):
+            full = _extract_contact_name_text(soup, text)
+            if " " in full:
+                parts = full.split(None, 1)
+                first_name, last_name = parts[0], parts[1]
+            else:
+                first_name = full
+
+        contact_name = f"{first_name} {last_name}".strip()
+
         return Lead(
             company_name=company_name,
             website=_canonical_website(source_url),
-            email=_first_match(_EMAIL_RE, text),
-            phone=_first_match(_PHONE_RE, text),
+            email=email,
+            phone=phone,
             source_url=source_url,
-            contact_name=_extract_contact_name(soup, text),
+            contact_name=contact_name,
+            first_name=first_name,
+            last_name=last_name,
         )
     except Exception as exc:
         logger.debug("parse_lead_info failed for %s: %s", source_url, exc)
         return None
 
 
-# ── Extraction helpers ────────────────────────────────────────────────────────
+# ── Contact link extractors ───────────────────────────────────────────────────
+
+def _extract_email_from_links(soup: BeautifulSoup) -> str:
+    """Prefer personal emails over generic ones found in mailto: hrefs."""
+    candidates: list[str] = []
+    for a in soup.find_all("a", href=re.compile(r"^mailto:", re.I)):
+        raw = a["href"][7:].split("?")[0].strip().lower()
+        if raw and _EMAIL_RE.match(raw) and "example." not in raw:
+            candidates.append(raw)
+    if not candidates:
+        return ""
+    # Prefer personal/named emails over generic ones
+    personal = [e for e in candidates
+                if not any(e.startswith(p) for p in _NOREPLY_PREFIXES)]
+    return (personal or candidates)[0]
+
+
+def _extract_phone_from_links(soup: BeautifulSoup) -> str:
+    """Extract phone number from tel: href attributes."""
+    for a in soup.find_all("a", href=re.compile(r"^tel:", re.I)):
+        raw = a["href"][4:].strip()
+        digits = re.sub(r"\D", "", raw)
+        if len(digits) >= 7:
+            return raw
+    return ""
+
+
+def _extract_name_from_schema(soup: BeautifulSoup) -> tuple[str, str]:
+    """Try schema.org/Person markup for structured first/last name."""
+    person_el = soup.find(attrs={"itemtype": re.compile(r"schema\.org/Person", re.I)})
+    if person_el:
+        fn = person_el.find(attrs={"itemprop": "givenName"})
+        ln = person_el.find(attrs={"itemprop": "familyName"})
+        if fn or ln:
+            return (fn.get_text(strip=True) if fn else "",
+                    ln.get_text(strip=True) if ln else "")
+        name_tag = person_el.find(attrs={"itemprop": "name"})
+        if name_tag:
+            full = name_tag.get_text(strip=True)
+            parts = full.split(None, 1)
+            return (parts[0], parts[1] if len(parts) > 1 else "")
+    return "", ""
+
+
+# ── Noise removal + text helpers ──────────────────────────────────────────────
 
 def _remove_noise(soup: BeautifulSoup) -> None:
     """Strip non-content tags that pollute the extracted text."""
-    for tag in soup.find_all(["script", "style", "noscript", "nav", "footer", "header", "aside"]):
+    for tag in soup.find_all(["script", "style", "noscript", "nav",
+                               "footer", "header", "aside"]):
         tag.decompose()
+
+
+def _best_email_from_text(text: str) -> str:
+    """Find the best email in plain text, preferring personal over generic."""
+    all_emails = _EMAIL_RE.findall(text)
+    if not all_emails:
+        return ""
+    personal = [e for e in all_emails
+                if not any(e.lower().startswith(p) for p in _NOREPLY_PREFIXES)]
+    return (personal or all_emails)[0]
 
 
 def _extract_company_name(soup: BeautifulSoup) -> str:
@@ -93,20 +174,17 @@ def _extract_company_name(soup: BeautifulSoup) -> str:
     return ""
 
 
-def _extract_contact_name(soup: BeautifulSoup, text: str) -> str:
-    """Look for schema.org Person markup; fall back to a name near 'Contact'."""
-    person_el = soup.find(attrs={"itemtype": re.compile(r"schema\.org/Person", re.I)})
-    if person_el:
-        name_tag = person_el.find(attrs={"itemprop": "name"})
-        if name_tag:
-            return name_tag.get_text(strip=True)
-
-    contact_block = re.search(r"Contact[\w\s]{0,30}\n(.{0,150})", text)
-    if contact_block:
-        m = _PERSON_NAME_RE.search(contact_block.group(1))
+def _extract_contact_name_text(soup: BeautifulSoup, text: str) -> str:
+    """Fallback: look for a person name near contact-related keywords."""
+    for pattern in (
+        r"(?:Contact|Director|Manager|CEO|Founder|Owner)[^\n]{0,40}\n(.{0,120})",
+        r"(?:Contact|Director|Manager|CEO|Founder|Owner)[^.]{0,60}",
+    ):
+        m = re.search(pattern, text)
         if m:
-            return m.group(1)
-
+            nm = _PERSON_NAME_RE.search(m.group(0))
+            if nm:
+                return nm.group(1)
     return ""
 
 

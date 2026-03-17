@@ -72,7 +72,10 @@ CREATE TABLE IF NOT EXISTS leads (
     website      TEXT    DEFAULT '',
     country      TEXT    DEFAULT '',
     city         TEXT    DEFAULT '',
+    first_name   TEXT    DEFAULT '',
+    last_name    TEXT    DEFAULT '',
     contact_name TEXT    DEFAULT '',
+    title        TEXT    DEFAULT '',
     role         TEXT    DEFAULT '',
     email        TEXT    DEFAULT '',
     phone        TEXT    DEFAULT '',
@@ -126,11 +129,24 @@ INSERT INTO settings (id) VALUES (1) ON CONFLICT DO NOTHING;
 """
 
 
+_DROP_DDL = """
+DROP TABLE IF EXISTS chat_turns, leads, visited_urls, search_runs, settings, sessions CASCADE;
+"""
+
+
 async def init_db() -> None:
     """Idempotent schema bootstrap.  Safe to call on every startup."""
     async with get_conn() as conn:
         await conn.execute(_DDL)
     logger.info("Database schema initialised.")
+
+
+async def reset_db() -> None:
+    """Drop all tables then recreate from scratch.  Wipes all data."""
+    async with get_conn() as conn:
+        await conn.execute(_DROP_DDL)
+        await conn.execute(_DDL)
+    logger.info("Database reset and schema recreated.")
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
@@ -300,19 +316,20 @@ async def insert_lead(lead: "Lead", session_id: Optional[int] = None) -> tuple[i
             return existing["id"], False
         row = await conn.fetchrow("""
             INSERT INTO leads (
-                company_name, website, country, city, contact_name, role,
+                company_name, website, country, city,
+                first_name, last_name, contact_name, title, role,
                 email, phone, source_url, category, size_signals, notes,
                 confidence, status, owner, last_touch, opt_out,
                 dedupe_key, session_id
             ) VALUES (
-                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
             ) RETURNING id
         """,
             lead.company_name, lead.website, lead.country, lead.city,
-            lead.contact_name, lead.role, lead.email, lead.phone,
-            lead.source_url, lead.category, lead.size_signals, lead.notes,
-            lead.confidence, lead.status, lead.owner, lead.last_touch,
-            bool(lead.opt_out), key, session_id,
+            lead.first_name, lead.last_name, lead.contact_name, lead.title, lead.role,
+            lead.email, lead.phone, lead.source_url, lead.category,
+            lead.size_signals, lead.notes, lead.confidence, lead.status,
+            lead.owner, lead.last_touch, bool(lead.opt_out), key, session_id,
         )
         return row["id"], True
 

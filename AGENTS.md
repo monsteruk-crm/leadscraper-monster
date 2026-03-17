@@ -30,3 +30,14 @@
 ## Deployment & Configuration Tips
 - Vercel routes `/` to the FastAPI app automatically; keep server logic inside `main.py` and static assets in `public/` for best alignment with the demo.
 - If you add env vars, document them here so future contributors know what Vercel secrets to set before pushing.
+
+## Documentation Rule
+
+When changing code, **update `/docs` in the same edit**:
+
+- Adding/changing a setting → update `docs/configuration.md`
+- Changing the pipeline, a module's responsibilities, or the lead schema → update `docs/architecture.md`
+- Changing CLI flags or run behaviour → update `docs/usage.md`
+- Changing the dashboard → update `docs/dashboard.md`
+
+Do not create new doc files without updating `docs/README.md` to link them.

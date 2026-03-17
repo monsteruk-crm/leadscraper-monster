@@ -25,13 +25,17 @@ _SYSTEM_PROMPT = """You are a B2B lead-qualification assistant.
 Given a raw scraped lead, return ONLY valid JSON with exactly these fields:
 {
   "company_name": "improved or corrected name (keep original if unsure)",
+  "first_name":   "contact first name if detectable from email/name/context, else empty string",
+  "last_name":    "contact last name if detectable, else empty string",
+  "title":        "job title / role (e.g. CEO, Sales Director, Founder) if detectable, else empty string",
   "country":      "ISO country name, or empty string",
   "city":         "city name, or empty string",
   "category":     "industry category (e.g. Sustainable Packaging, Event Services)",
   "notes":        "one-sentence summary of what this company does",
   "confidence":   0.0
 }
-confidence: 0.0–1.0. Use 0.0 for spam/irrelevant pages, 0.5 for plausible but thin data, 0.9+ for clear business with contact info.
+confidence: 0.0-1.0. Use 0.0 for spam/irrelevant, 0.5 for thin data, 0.9+ for clear business with email.
+If the email looks like firstname.lastname@domain.com or firstname@domain.com, infer the name from it.
 Do NOT output any text outside the JSON object."""
 
 
@@ -59,6 +63,9 @@ async def enrich_lead(
         f"Email: {lead.email}\n"
         f"Phone: {lead.phone}\n"
         f"Contact: {lead.contact_name}\n"
+        f"First name: {lead.first_name}\n"
+        f"Last name: {lead.last_name}\n"
+        f"Title: {lead.title}\n"
         f"Source URL: {lead.source_url}\n"
     )
 
@@ -77,11 +84,17 @@ async def enrich_lead(
 
         # Only overwrite blank fields; never discard existing data.
         lead.company_name = data.get("company_name") or lead.company_name
+        lead.first_name = lead.first_name or data.get("first_name", "")
+        lead.last_name = lead.last_name or data.get("last_name", "")
+        lead.title = lead.title or data.get("title", "")
         lead.country = lead.country or data.get("country", "")
         lead.city = lead.city or data.get("city", "")
         lead.category = lead.category or data.get("category", "")
         lead.notes = lead.notes or data.get("notes", "")
         lead.confidence = float(data.get("confidence", lead.confidence))
+        # Keep contact_name in sync
+        if not lead.contact_name and (lead.first_name or lead.last_name):
+            lead.contact_name = f"{lead.first_name} {lead.last_name}".strip()
 
         logger.debug(
             "Enriched '%s' — confidence=%.2f category='%s'",

@@ -18,8 +18,11 @@ class Lead:
     website: str = ""
     country: str = ""
     city: str = ""
-    contact_name: str = ""
-    role: str = ""
+    first_name: str = ""
+    last_name: str = ""
+    contact_name: str = ""   # first_name + last_name joined; kept for compat
+    title: str = ""          # job title / role
+    role: str = ""           # legacy alias for title
     email: str = ""
     phone: str = ""
     source_url: str = ""

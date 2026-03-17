@@ -197,7 +197,10 @@ class LeadScraper:
                 # Yield SSE event for real-time streaming
                 yield LeadEvent("lead", {
                     "company_name": lead.company_name,
+                    "first_name": lead.first_name or "",
+                    "last_name": lead.last_name or "",
                     "email": lead.email or "",
+                    "phone": lead.phone or "",
                     "website": lead.website,
                     "category": lead.category,
                     "confidence": lead.confidence,
