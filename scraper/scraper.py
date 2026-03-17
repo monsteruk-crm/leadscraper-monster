@@ -188,11 +188,17 @@ class LeadScraper:
                 result.leads.append(lead)
                 result.leads_new += 1
 
-                # Persist via callback
+                # Persist via callback — emit a warning event on failure
+                # so the blank-table bug is visible instead of silent.
+                db_save_ok = True
                 try:
                     await on_lead(lead, session_id)
                 except Exception as exc:
                     logger.warning("on_lead callback failed: %s", exc)
+                    db_save_ok = False
+                    yield LeadEvent("warning", {
+                        "msg": f"DB save failed for '{lead.company_name}': {exc}"
+                    })
 
                 # Yield SSE event for real-time streaming
                 yield LeadEvent("lead", {

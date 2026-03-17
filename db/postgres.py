@@ -35,15 +35,41 @@ _pool: Optional[asyncpg.Pool] = None
 async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(cfg.DATABASE_URL, min_size=1, max_size=5)
+        # statement_cache_size=0 prevents stale prepared-statement errors
+        # after DDL changes (e.g. Reset DB or table recreation).
+        _pool = await asyncpg.create_pool(
+            cfg.DATABASE_URL,
+            min_size=1,
+            max_size=5,
+            statement_cache_size=0,
+        )
     return _pool
+
+
+async def _close_pool() -> None:
+    """Close and discard the module-level pool (call after DDL changes)."""
+    global _pool
+    if _pool is not None:
+        try:
+            await _pool.close()
+        except Exception:
+            pass
+        _pool = None
 
 
 @asynccontextmanager
 async def get_conn():
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        yield conn
+    """Yield a connection, recreating the pool once on any interface error."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            yield conn
+    except (asyncpg.InterfaceError, OSError) as exc:
+        logger.warning("Pool error (%s) — recreating pool and retrying.", exc)
+        await _close_pool()
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            yield conn
 
 
 # ── Schema bootstrap ─────────────────────────────────────────────────────────
@@ -178,6 +204,9 @@ async def reset_db() -> None:
         await conn.execute(_DROP_DDL)
         await conn.execute(_DDL)
         await conn.execute(_SEED_SETTINGS)
+    # Discard the pool so the next request gets fresh connections with no
+    # cached prepared statements pointing at the old (dropped) schema.
+    await _close_pool()
     logger.info("Database reset and schema recreated.")
 
 
