@@ -8,7 +8,7 @@ The new shell is MUI-based and intentionally feature-shaped:
 - fixed top bar with API health status
 - permanent navigation rail on desktop
 - tighter summary cards and a wider terminal pane
-- hero row now includes the Monster logo in its own panel beside the main dashboard shell copy
+- hero row now includes the Monster logo as a plain image beside the main dashboard shell copy, ending above the metrics divider
 - terminal text reduced for denser operator output
 - hero metric cards now use a label/value row with circular, metric-colored counters
 - hero metric labels are larger and bolder

@@ -1704,11 +1704,8 @@ function App() {
               >
                 <Box
                   sx={{
-                    minHeight: { xs: 240, lg: '100%' },
-                    borderRadius: 3,
-                    border: '1px solid rgba(148, 163, 184, 0.18)',
-                    bgcolor: 'rgba(255,255,255,0.03)',
-                    backgroundImage: 'url(/img/logo.png)',
+                    minHeight: { xs: 220, lg: 240 },
+                    backgroundImage: `url(${import.meta.env.BASE_URL}img/logo.png)`,
                     backgroundPosition: 'center',
                     backgroundRepeat: 'no-repeat',
                     backgroundSize: 'contain',
@@ -1716,7 +1713,6 @@ function App() {
                 />
 
                 <Stack
-                  spacing={2.25}
                   justifyContent="space-between"
                   sx={{ minHeight: { lg: 240 } }}
                 >
@@ -1748,21 +1744,22 @@ function App() {
                       </Button>
                     </Stack>
                   </Stack>
-
-                  <Divider />
-
-                  <Box
-                    sx={{
-                      display: 'grid',
-                      gap: 2,
-                      gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' },
-                    }}
-                  >
-                    {dashboardMetrics.map((metric) => (
-                      <MetricTile key={metric.label} {...metric} />
-                    ))}
-                  </Box>
                 </Stack>
+
+                <Divider sx={{ gridColumn: '1 / -1' }} />
+
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gap: 2,
+                    gridColumn: '1 / -1',
+                    gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' },
+                  }}
+                >
+                  {dashboardMetrics.map((metric) => (
+                    <MetricTile key={metric.label} {...metric} />
+                  ))}
+                </Box>
               </Box>
             </Paper>
 
