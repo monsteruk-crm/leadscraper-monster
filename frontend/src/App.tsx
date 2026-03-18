@@ -20,7 +20,6 @@ import {
   ListItemButton,
   ListItemText,
   MenuItem,
-  Pagination,
   Paper,
   Stack,
   Switch,
@@ -31,7 +30,9 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
+  TableSortLabel,
   TextField,
   Toolbar,
   Typography,
@@ -78,13 +79,28 @@ type LeadRecord = {
   source_url?: string
   archived?: boolean
   opt_out?: boolean
+  created_at?: string
 }
+
+type LeadSortField =
+  | 'company_name'
+  | 'contact_name'
+  | 'role'
+  | 'email'
+  | 'country'
+  | 'city'
+  | 'category'
+  | 'confidence'
+  | 'status'
+  | 'created_at'
 
 type LeadsResponse = {
   leads: LeadRecord[]
   total: number
   page: number
   page_size: number
+  sort_by?: LeadSortField
+  sort_dir?: 'asc' | 'desc'
 }
 
 type SessionRecord = {
@@ -110,6 +126,7 @@ type RunRecord = {
   leads_new?: number
   leads_duplicate?: number
   leads_discarded?: number
+  started_at?: string
   finished_at?: string
   created_at?: string
 }
@@ -121,6 +138,9 @@ type ConfigState = {
   request_delay_seconds: number
   ai_enrichment_enabled: boolean
   ai_confidence_threshold: number
+  leads_default_country: string
+  leads_default_status: string
+  leads_default_category: string
 }
 
 type PipelineStage = {
@@ -128,6 +148,16 @@ type PipelineStage = {
   count: string
   hint: string
   tone: DashboardMetric['tone']
+}
+
+type ScrapeFeedItem = {
+  company_name: string
+  email: string
+  city: string
+  country: string
+  confidence: number
+  category: string
+  received_at: string
 }
 
 const navItems = ['Overview', 'Leads', 'Terminal', 'Settings'] as const
@@ -155,6 +185,9 @@ const defaultConfig: ConfigState = {
   request_delay_seconds: 1.5,
   ai_enrichment_enabled: true,
   ai_confidence_threshold: 0,
+  leads_default_country: '',
+  leads_default_status: '',
+  leads_default_category: '',
 }
 
 const leadStatusOptions = ['New', 'Queued', 'Reviewing', 'Qualified', 'Contacted'] as const
@@ -163,7 +196,9 @@ const emptyLeads: LeadsResponse = {
   leads: [],
   total: 0,
   page: 1,
-  page_size: 50,
+  page_size: 25,
+  sort_by: 'created_at',
+  sort_dir: 'desc',
 }
 
 const emptyStats: StatsResponse = {
@@ -273,6 +308,61 @@ function formatRelativeTime(value?: string): string {
   return formatter.format(seconds, 'second')
 }
 
+function formatDateTime(value?: string): string {
+  if (!value) {
+    return '-'
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
+
+type StoredLeadTablePrefs = {
+  rowsPerPage: number
+  sortBy: LeadSortField
+  sortDir: 'asc' | 'desc'
+  country: string
+  status: string
+  category: string
+}
+
+function leadPrefsKey(sessionId: number | null): string {
+  return `lead-table-prefs:${sessionId ?? 'default'}`
+}
+
+function readLeadPrefs(sessionId: number | null): StoredLeadTablePrefs | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  try {
+    const raw = window.localStorage.getItem(leadPrefsKey(sessionId))
+    if (!raw) {
+      return null
+    }
+    return JSON.parse(raw) as StoredLeadTablePrefs
+  } catch {
+    return null
+  }
+}
+
+function writeLeadPrefs(sessionId: number | null, prefs: StoredLeadTablePrefs): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  try {
+    window.localStorage.setItem(leadPrefsKey(sessionId), JSON.stringify(prefs))
+  } catch {
+    // Ignore storage failures; the table still works without persistence.
+  }
+}
+
 function buildContactName(lead: LeadRecord): string {
   const fromParts = [lead.first_name, lead.last_name].filter(Boolean).join(' ').trim()
   return fromParts || lead.contact_name || '-'
@@ -366,6 +456,12 @@ function App() {
   const [tab, setTab] = useState<NavItem>('Overview')
   const [search, setSearch] = useState('')
   const [leadPage, setLeadPage] = useState(1)
+  const [leadRowsPerPage, setLeadRowsPerPage] = useState(emptyLeads.page_size)
+  const [leadSortBy, setLeadSortBy] = useState<LeadSortField>('created_at')
+  const [leadSortDir, setLeadSortDir] = useState<'asc' | 'desc'>('desc')
+  const [countryFilter, setCountryFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
   const [includeArchived, setIncludeArchived] = useState(false)
   const [sessionsOpen, setSessionsOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -384,6 +480,8 @@ function App() {
   const [terminalBusy, setTerminalBusy] = useState(false)
   const [terminalStatus, setTerminalStatus] = useState<string>('Ready')
   const [terminalError, setTerminalError] = useState<string | null>(null)
+  const [liveScrapeFeed, setLiveScrapeFeed] = useState<ScrapeFeedItem[]>([])
+  const [liveScrapeMessages, setLiveScrapeMessages] = useState<string[]>([])
 
   const blurActiveElement = useCallback(() => {
     const active = document.activeElement
@@ -482,17 +580,34 @@ function App() {
   }, [])
 
   const loadLeads = useCallback(
-    async (query: string, archived: boolean, page: number, signal?: AbortSignal) => {
+    async (
+      query: string,
+      archived: boolean,
+      page: number,
+      pageSize: number,
+      sortBy: LeadSortField,
+      sortDir: 'asc' | 'desc',
+      country: string,
+      status: string,
+      category: string,
+      signal?: AbortSignal,
+    ) => {
       setLeadsLoading(true)
       try {
         const params = new URLSearchParams({
           page: String(page),
-          page_size: '50',
+          page_size: String(pageSize),
           search: query,
           include_archived: archived ? 'true' : 'false',
+          sort_by: sortBy,
+          sort_dir: sortDir,
+          country,
+          status,
+          category,
         })
         const payload = await fetchJson<LeadsResponse>(`/api/leads?${params.toString()}`, { signal })
         setLeadResponse(payload)
+        setLeadRowsPerPage(payload.page_size)
         return payload
       } finally {
         if (!signal?.aborted) {
@@ -503,7 +618,17 @@ function App() {
     [],
   )
 
-  const refreshAll = useCallback(async (query = search, archived = includeArchived, page = leadPage) => {
+  const refreshAll = useCallback(async (
+    query = search,
+    archived = includeArchived,
+    page = leadPage,
+    pageSize = leadRowsPerPage,
+    sortBy = leadSortBy,
+    sortDir = leadSortDir,
+    country = countryFilter,
+    status = statusFilter,
+    category = categoryFilter,
+  ) => {
     setError(null)
     setNotice(null)
     setDashboardLoading(true)
@@ -514,14 +639,30 @@ function App() {
         loadConfig(),
         loadSessions(),
         loadRuns(),
-        loadLeads(query, archived, page),
+        loadLeads(query, archived, page, pageSize, sortBy, sortDir, country, status, category),
       ])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load dashboard')
     } finally {
       setDashboardLoading(false)
     }
-  }, [includeArchived, leadPage, loadConfig, loadHealth, loadLeads, loadRuns, loadSessions, loadStats, search])
+  }, [
+    includeArchived,
+    leadPage,
+    leadRowsPerPage,
+    leadSortBy,
+    leadSortDir,
+    countryFilter,
+    statusFilter,
+    categoryFilter,
+    loadConfig,
+    loadHealth,
+    loadLeads,
+    loadRuns,
+    loadSessions,
+    loadStats,
+    search,
+  ])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -535,7 +676,7 @@ function App() {
       loadConfig(controller.signal),
       loadSessions(controller.signal),
       loadRuns(controller.signal),
-      loadLeads('', false, 1, controller.signal),
+      loadLeads('', false, 1, leadRowsPerPage, leadSortBy, leadSortDir, countryFilter, statusFilter, categoryFilter, controller.signal),
     ])
       .catch((err) => {
         if (!controller.signal.aborted) {
@@ -549,17 +690,28 @@ function App() {
       })
 
     return () => controller.abort()
-  }, [loadConfig, loadHealth, loadLeads, loadRuns, loadSessions, loadStats])
+  }, [categoryFilter, countryFilter, leadRowsPerPage, leadSortBy, leadSortDir, loadConfig, loadHealth, loadLeads, loadRuns, loadSessions, loadStats, statusFilter])
 
   useEffect(() => {
     const controller = new AbortController()
-    void loadLeads(search, includeArchived, leadPage, controller.signal).catch((err) => {
+    void loadLeads(
+      search,
+      includeArchived,
+      leadPage,
+      leadRowsPerPage,
+      leadSortBy,
+      leadSortDir,
+      countryFilter,
+      statusFilter,
+      categoryFilter,
+      controller.signal,
+    ).catch((err) => {
       if (!controller.signal.aborted) {
         setError(err instanceof Error ? err.message : 'Failed to load leads')
       }
     })
     return () => controller.abort()
-  }, [includeArchived, leadPage, loadLeads, search])
+  }, [categoryFilter, countryFilter, includeArchived, leadPage, leadRowsPerPage, leadSortBy, leadSortDir, loadLeads, search, statusFilter])
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -572,9 +724,66 @@ function App() {
     })
   }, [activeSessionId, loadSessionHistory])
 
+  useEffect(() => {
+    const stored = readLeadPrefs(activeSessionId)
+    if (stored) {
+      setLeadRowsPerPage(stored.rowsPerPage)
+      setLeadSortBy(stored.sortBy)
+      setLeadSortDir(stored.sortDir)
+      setCountryFilter(stored.country)
+      setStatusFilter(stored.status)
+      setCategoryFilter(stored.category)
+    } else {
+      setLeadRowsPerPage(emptyLeads.page_size)
+      setLeadSortBy('created_at')
+      setLeadSortDir('desc')
+      setCountryFilter(configDraft.leads_default_country)
+      setStatusFilter(configDraft.leads_default_status)
+      setCategoryFilter(configDraft.leads_default_category)
+    }
+    setLeadPage(1)
+  }, [
+    activeSessionId,
+    configDraft.leads_default_category,
+    configDraft.leads_default_country,
+    configDraft.leads_default_status,
+  ])
+
+  useEffect(() => {
+    writeLeadPrefs(activeSessionId, {
+      rowsPerPage: leadRowsPerPage,
+      sortBy: leadSortBy,
+      sortDir: leadSortDir,
+      country: countryFilter,
+      status: statusFilter,
+      category: categoryFilter,
+    })
+  }, [activeSessionId, categoryFilter, countryFilter, leadRowsPerPage, leadSortBy, leadSortDir, statusFilter])
+
   const reloadOperationalData = useCallback(async () => {
-    await Promise.all([loadHealth(), loadStats(), loadRuns(), loadSessions(), loadLeads(search, includeArchived, leadPage)])
-  }, [includeArchived, leadPage, loadHealth, loadLeads, loadRuns, loadSessions, loadStats, search])
+    await Promise.all([
+      loadHealth(),
+      loadStats(),
+      loadRuns(),
+      loadSessions(),
+      loadLeads(search, includeArchived, leadPage, leadRowsPerPage, leadSortBy, leadSortDir, countryFilter, statusFilter, categoryFilter),
+    ])
+  }, [
+    categoryFilter,
+    countryFilter,
+    includeArchived,
+    leadPage,
+    leadRowsPerPage,
+    leadSortBy,
+    leadSortDir,
+    loadHealth,
+    loadLeads,
+    loadRuns,
+    loadSessions,
+    loadStats,
+    search,
+    statusFilter,
+  ])
 
   const setActiveSession = useCallback((session: SessionRecord) => {
     setActiveSessionId(session.id)
@@ -656,7 +865,21 @@ function App() {
         await fetchJson<{ status: string }>(`/api/leads/${lead.id}/archive?archived=${(!lead.archived).toString()}`, {
           method: 'PATCH',
         })
-        await Promise.all([loadLeads(search, includeArchived, leadPage), loadStats(), loadHealth()])
+        await Promise.all([
+          loadLeads(
+            search,
+            includeArchived,
+            leadPage,
+            leadRowsPerPage,
+            leadSortBy,
+            leadSortDir,
+            countryFilter,
+            statusFilter,
+            categoryFilter,
+          ),
+          loadStats(),
+          loadHealth(),
+        ])
         if (leadDetail?.id === lead.id) {
           setLeadDetail({ ...lead, archived: !lead.archived })
         }
@@ -667,7 +890,7 @@ function App() {
         setWorking(false)
       }
     },
-    [includeArchived, leadDetail?.id, leadPage, loadHealth, loadLeads, loadStats, search],
+    [categoryFilter, countryFilter, includeArchived, leadDetail?.id, leadPage, leadRowsPerPage, leadSortBy, leadSortDir, loadHealth, loadLeads, loadStats, search, statusFilter],
   )
 
   const applyLeadUpdateLocally = useCallback((leadId: number, patch: Partial<LeadRecord>) => {
@@ -706,7 +929,17 @@ function App() {
     setNotice(null)
     try {
       const payload = await fetchJson<{ message?: string }>('/api/db/init', { method: 'POST' })
-      await refreshAll(search, includeArchived, leadPage)
+      await refreshAll(
+        search,
+        includeArchived,
+        leadPage,
+        leadRowsPerPage,
+        leadSortBy,
+        leadSortDir,
+        countryFilter,
+        statusFilter,
+        categoryFilter,
+      )
       setNotice(payload.message ?? 'Database initialised')
       return true
     } catch (err) {
@@ -715,7 +948,7 @@ function App() {
       setWorking(false)
     }
     return false
-  }, [includeArchived, leadPage, refreshAll, search])
+  }, [categoryFilter, countryFilter, includeArchived, leadPage, leadRowsPerPage, leadSortBy, leadSortDir, refreshAll, search, statusFilter])
 
   const handleDbReset = useCallback(async () => {
     if (!window.confirm('Reset the database and wipe all data?')) {
@@ -729,8 +962,13 @@ function App() {
       setSearch('')
       setIncludeArchived(false)
       setLeadPage(1)
+      setCountryFilter('')
+      setStatusFilter('')
+      setCategoryFilter('')
       setLeadDetail(null)
-      await refreshAll('', false, 1)
+      setLiveScrapeFeed([])
+      setLiveScrapeMessages([])
+      await refreshAll('', false, 1, leadRowsPerPage, leadSortBy, leadSortDir, '', '', '')
       setNotice(payload.message ?? 'Database reset')
       return true
     } catch (err) {
@@ -739,7 +977,7 @@ function App() {
       setWorking(false)
     }
     return false
-  }, [refreshAll])
+  }, [leadRowsPerPage, leadSortBy, leadSortDir, refreshAll])
 
   const handleExportLeads = useCallback(() => {
     window.open('/api/leads/export', '_blank', 'noopener,noreferrer')
@@ -856,6 +1094,36 @@ function App() {
   const recentSessions = sessions.slice(0, 3)
   const currentSession = sessions.find((session) => session.id === activeSessionId) ?? null
   const totalLeadPages = Math.max(1, Math.ceil(leadResponse.total / Math.max(leadResponse.page_size, 1)))
+  const liveScrapeLeadCount = liveScrapeFeed.length
+  const countryOptions = useMemo(
+    () => Array.from(new Set(leadResponse.leads.map((lead) => lead.country?.trim()).filter(Boolean) as string[])).sort(),
+    [leadResponse.leads],
+  )
+  const statusOptions = useMemo(
+    () => Array.from(new Set(leadResponse.leads.map((lead) => lead.status?.trim()).filter(Boolean) as string[])).sort(),
+    [leadResponse.leads],
+  )
+  const categoryOptions = useMemo(
+    () => Array.from(new Set(leadResponse.leads.map((lead) => lead.category?.trim()).filter(Boolean) as string[])).sort(),
+    [leadResponse.leads],
+  )
+
+  const handleLeadSort = useCallback((field: LeadSortField) => {
+    setLeadPage(1)
+    setLeadSortBy((currentField) => {
+      if (currentField === field) {
+        setLeadSortDir((currentDir) => (currentDir === 'asc' ? 'desc' : 'asc'))
+        return currentField
+      }
+      setLeadSortDir(field === 'created_at' ? 'desc' : 'asc')
+      return field
+    })
+  }, [])
+
+  const handleLeadRowsPerPageChange = useCallback((event: { target: { value: string } }) => {
+    setLeadRowsPerPage(Number.parseInt(event.target.value, 10))
+    setLeadPage(1)
+  }, [])
 
   const runChatCommand = useCallback(
     async (message: string) => {
@@ -915,42 +1183,121 @@ function App() {
       setTerminalBusy(true)
       setTerminalError(null)
       setTerminalStatus(`Starting scrape for ${finalKeywords.join(', ')}`)
-      const events = await collectSseEvents('/api/scrape', {
-        keywords: finalKeywords,
-        session_id: activeSessionId,
-        max_pages: configDraft.max_pages,
-        target_new_leads: configDraft.target_new_leads,
+      setTab('Leads')
+      setLiveScrapeFeed([])
+      setLiveScrapeMessages([`Starting scrape for ${finalKeywords.join(', ')}`])
+      const lines: string[] = [`scrape: ${finalKeywords.join(', ')}`]
+      const response = await fetch('/api/scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keywords: finalKeywords,
+          session_id: activeSessionId,
+          max_pages: configDraft.max_pages,
+          target_new_leads: configDraft.target_new_leads,
+        }),
       })
 
-      const lines: string[] = [`scrape: ${finalKeywords.join(', ')}`]
-      for (const event of events) {
-        if (event.type === 'progress') {
-          setTerminalStatus(String(event.msg ?? 'Scrape running...'))
+      if (!response.ok || !response.body) {
+        const text = await response.text()
+        throw new Error(text || `Request failed with ${response.status}`)
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let leadEventsSeen = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) {
+          break
         }
-        if (event.type === 'lead') {
-          const company = String(event.company_name ?? '?')
-          const email = String(event.email ?? '-')
-          const confidence = Number(event.confidence ?? 0).toFixed(2)
-          lines.push(`lead: ${company} | ${email} | conf=${confidence}`)
-          setTerminalStatus(`Found ${lines.filter((line) => line.startsWith('lead:')).length} new lead events`)
+
+        buffer += decoder.decode(value, { stream: true })
+        const linesBuffer = buffer.split('\n')
+        buffer = linesBuffer.pop() ?? ''
+
+        for (const line of linesBuffer) {
+          if (!line.startsWith('data:')) {
+            continue
+          }
+
+          const payload = line.slice(5).trim()
+          if (!payload) {
+            continue
+          }
+
+          const event = JSON.parse(payload) as Record<string, unknown>
+          if (event.type === 'progress') {
+            const message = String(event.msg ?? 'Scrape running...')
+            setTerminalStatus(message)
+            setLiveScrapeMessages((current) => [message, ...current].slice(0, 8))
+          }
+          if (event.type === 'lead') {
+            const company = String(event.company_name ?? '?')
+            const email = String(event.email ?? '-')
+            const confidence = Number(event.confidence ?? 0)
+            const city = String(event.city ?? '')
+            const country = String(event.country ?? '')
+            const category = String(event.category ?? '')
+            leadEventsSeen += 1
+            lines.push(`lead: ${company} | ${email} | conf=${confidence.toFixed(2)}`)
+            setTerminalStatus(`Found ${leadEventsSeen} lead${leadEventsSeen === 1 ? '' : 's'}`)
+            setLiveScrapeFeed((current) => [
+              {
+                company_name: company,
+                email,
+                city,
+                country,
+                category,
+                confidence,
+                received_at: new Date().toISOString(),
+              },
+              ...current,
+            ].slice(0, 12))
+          }
+          if (event.type === 'warning') {
+            const message = String(event.msg ?? 'Scrape warning')
+            lines.push(`warning: ${message}`)
+            setTerminalStatus(message)
+            setLiveScrapeMessages((current) => [`Warning: ${message}`, ...current].slice(0, 8))
+          }
+          if (event.type === 'error') {
+            const message = String(event.content ?? 'Scrape failed')
+            setTerminalError(message)
+            setTerminalStatus('Scrape failed')
+            setLiveScrapeMessages((current) => [`Error: ${message}`, ...current].slice(0, 8))
+            setTerminalBusy(false)
+            throw new Error(message)
+          }
+          if (event.type === 'done') {
+            const summary =
+              `Scrape complete: ${String(event.leads_new ?? 0)} new, ` +
+              `${String(event.leads_duplicate ?? 0)} dup, ${String(event.pages_visited ?? 0)} pages`
+            setTerminalStatus(summary)
+            setLiveScrapeMessages((current) => [summary, ...current].slice(0, 8))
+            lines.push(
+              `done: new=${String(event.leads_new ?? 0)} dup=${String(event.leads_duplicate ?? 0)} discarded=${String(event.leads_discarded ?? 0)} pages=${String(event.pages_visited ?? 0)}`,
+            )
+          }
         }
-        if (event.type === 'warning') {
-          lines.push(`warning: ${String(event.msg ?? '')}`)
-          setTerminalStatus(String(event.msg ?? 'Scrape warning'))
-        }
-        if (event.type === 'error') {
-          setTerminalError(String(event.content ?? 'Scrape failed'))
-          setTerminalStatus('Scrape failed')
-          setTerminalBusy(false)
-          throw new Error(String(event.content ?? 'Scrape failed'))
-        }
-        if (event.type === 'done') {
-          setTerminalStatus(
-            `Scrape complete: ${String(event.leads_new ?? 0)} new, ${String(event.leads_duplicate ?? 0)} dup, ${String(event.pages_visited ?? 0)} pages`,
-          )
-          lines.push(
-            `done: new=${String(event.leads_new ?? 0)} dup=${String(event.leads_duplicate ?? 0)} discarded=${String(event.leads_discarded ?? 0)} pages=${String(event.pages_visited ?? 0)}`,
-          )
+      }
+
+      if (buffer.startsWith('data:')) {
+        const payload = buffer.slice(5).trim()
+        if (payload) {
+          const event = JSON.parse(payload) as Record<string, unknown>
+          if (event.type === 'done') {
+            const summary =
+              `Scrape complete: ${String(event.leads_new ?? 0)} new, ` +
+              `${String(event.leads_duplicate ?? 0)} dup, ${String(event.pages_visited ?? 0)} pages`
+            setTerminalStatus(summary)
+            setLiveScrapeMessages((current) => [summary, ...current].slice(0, 8))
+            lines.push(
+              `done: new=${String(event.leads_new ?? 0)} dup=${String(event.leads_duplicate ?? 0)} discarded=${String(event.leads_discarded ?? 0)} pages=${String(event.pages_visited ?? 0)}`,
+            )
+          }
         }
       }
 
@@ -1118,7 +1465,17 @@ function App() {
         executeTerminalTask(async () => {
           const query = parts.join(' ').trim()
           setTerminalStatus(`Loading leads${query ? ` for "${query}"` : ''}...`)
-          const payload = await loadLeads(query, includeArchived, 1)
+          const payload = await loadLeads(
+            query,
+            includeArchived,
+            1,
+            leadRowsPerPage,
+            leadSortBy,
+            leadSortDir,
+            countryFilter,
+            statusFilter,
+            categoryFilter,
+          )
           setTerminalStatus(`Loaded ${payload.leads.length} leads`)
           if (payload.leads.length === 0) {
             return 'No leads found.'
@@ -1159,9 +1516,14 @@ function App() {
       handleDbReset,
       handleExportLeads,
       includeArchived,
+      categoryFilter,
+      countryFilter,
       loadConfig,
       loadHealth,
       loadLeads,
+      leadRowsPerPage,
+      leadSortBy,
+      leadSortDir,
       loadSessionHistory,
       loadSessions,
       loadStats,
@@ -1169,6 +1531,7 @@ function App() {
       runScrapeCommand,
       sessions,
       setActiveSession,
+      statusFilter,
     ],
   )
 
@@ -1331,47 +1694,75 @@ function App() {
                 backdropFilter: 'blur(16px)',
               }}
             >
-              <Stack
-                direction={{ xs: 'column', md: 'row' }}
-                spacing={2.25}
-                alignItems={{ xs: 'stretch', md: 'center' }}
-                justifyContent="space-between"
-              >
-                <Box sx={{ maxWidth: 720 }}>
-                  <Typography variant="overline" sx={{ color: 'primary.light', letterSpacing: 2 }}>
-                    Dashboard shell
-                  </Typography>
-                  <Typography variant="h4" gutterBottom sx={{ fontSize: { xs: '2rem', md: '2.5rem' } }}>
-                    THE MONSTER LEAD SCRAPER
-                  </Typography>
-                  <Typography color="text.secondary" sx={{ lineHeight: 1.6, maxWidth: 760 }}>
-                    The rebuild now reads live health, stats, leads, sessions, runs, and config from the
-                    Python API. Export, archive, rename, save, and terminal workflows all call the backend.
-                  </Typography>
-                </Box>
-
-                <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="flex-end">
-                  <Button variant="contained" onClick={openSettingsDialog}>
-                    Open settings
-                  </Button>
-                  <Button variant="outlined" onClick={openSessionsDrawer}>
-                    Open sessions
-                  </Button>
-                </Stack>
-              </Stack>
-
-              <Divider sx={{ my: 3 }} />
-
               <Box
                 sx={{
                   display: 'grid',
-                  gap: 2,
-                  gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' },
+                  gap: 2.25,
+                  gridTemplateColumns: { xs: '1fr', lg: '280px minmax(0, 1fr)' },
+                  alignItems: 'stretch',
                 }}
               >
-                {dashboardMetrics.map((metric) => (
-                  <MetricTile key={metric.label} {...metric} />
-                ))}
+                <Box
+                  sx={{
+                    minHeight: { xs: 240, lg: '100%' },
+                    borderRadius: 3,
+                    border: '1px solid rgba(148, 163, 184, 0.18)',
+                    bgcolor: 'rgba(255,255,255,0.03)',
+                    backgroundImage: 'url(/img/logo.png)',
+                    backgroundPosition: 'center',
+                    backgroundRepeat: 'no-repeat',
+                    backgroundSize: 'contain',
+                  }}
+                />
+
+                <Stack
+                  spacing={2.25}
+                  justifyContent="space-between"
+                  sx={{ minHeight: { lg: 240 } }}
+                >
+                  <Stack
+                    direction={{ xs: 'column', md: 'row' }}
+                    spacing={2.25}
+                    alignItems={{ xs: 'stretch', md: 'flex-start' }}
+                    justifyContent="space-between"
+                  >
+                    <Box sx={{ maxWidth: 720 }}>
+                      <Typography variant="overline" sx={{ color: 'primary.light', letterSpacing: 2 }}>
+                        Dashboard shell
+                      </Typography>
+                      <Typography variant="h4" gutterBottom sx={{ fontSize: { xs: '2rem', md: '2.5rem' } }}>
+                        THE MONSTER LEAD SCRAPER
+                      </Typography>
+                      <Typography color="text.secondary" sx={{ lineHeight: 1.6, maxWidth: 760 }}>
+                        The rebuild now reads live health, stats, leads, sessions, runs, and config from the
+                        Python API. Export, archive, rename, save, and terminal workflows all call the backend.
+                      </Typography>
+                    </Box>
+
+                    <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="flex-end">
+                      <Button variant="contained" onClick={openSettingsDialog}>
+                        Open settings
+                      </Button>
+                      <Button variant="outlined" onClick={openSessionsDrawer}>
+                        Open sessions
+                      </Button>
+                    </Stack>
+                  </Stack>
+
+                  <Divider />
+
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gap: 2,
+                      gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' },
+                    }}
+                  >
+                    {dashboardMetrics.map((metric) => (
+                      <MetricTile key={metric.label} {...metric} />
+                    ))}
+                  </Box>
+                </Stack>
               </Box>
             </Paper>
 
@@ -1459,11 +1850,16 @@ function App() {
                     sx={{
                       height: 480,
                       overflow: 'hidden',
-                      borderRadius: 2,
+                      borderRadius: 0,
                       '& .index_terminal__teubZ': {
                         width: '100%',
                         height: '100%',
+                        borderRadius: 0,
                       },
+                      '& .index_terminal__teubZ, & .index_container__qBh4T, & .index_toolbar__fuk6Z, & .index_body__QuIC5':
+                        {
+                          borderRadius: 0,
+                        },
                       '& .index_editor__JoDSg, & .index_editor__JoDSg *': {
                         fontSize: '14px',
                         lineHeight: 1.35,
@@ -1473,7 +1869,9 @@ function App() {
                     <ReactTerminal
                       commands={terminalCommands}
                       welcomeMessage={
-                        'LeadScraper Monster terminal. Type a normal message to chat with the AI, or type help to inspect available commands.\n'
+                        <Box component="div" sx={{ display: 'block', mb: 1 }}>
+                          LeadScraper Monster terminal. Type a normal message to chat with the AI, or type help to inspect available commands.
+                        </Box>
                       }
                       prompt="monster"
                       theme="dracula"
@@ -1598,7 +1996,7 @@ function App() {
                                   </Typography>
                                 </Box>
                                 <Typography variant="caption" color="text.secondary">
-                                  {formatRelativeTime(run.finished_at ?? run.created_at)}
+                                  {formatRelativeTime(run.finished_at ?? run.started_at ?? run.created_at)}
                                 </Typography>
                               </Stack>
                             </Paper>
@@ -1621,7 +2019,7 @@ function App() {
                         setSearch(event.target.value)
                         setLeadPage(1)
                       }}
-                      placeholder="company, contact, category, email..."
+                      placeholder="company, contact, category, email, city..."
                     />
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                       <FormControlLabel
@@ -1644,92 +2042,268 @@ function App() {
 
                   <Typography variant="body2" color="text.secondary">
                     Showing page {leadResponse.page} of {totalLeadPages} - {leadResponse.leads.length} of {leadResponse.total} matching leads.
+                    Sorted by {leadSortBy.replace('_', ' ')} {leadSortDir.toUpperCase()}.
                   </Typography>
 
-                  <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'rgba(255,255,255,0.02)' }}>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Company</TableCell>
-                          <TableCell>Contact</TableCell>
-                          <TableCell>Role</TableCell>
-                          <TableCell>Email</TableCell>
-                          <TableCell>Country</TableCell>
-                          <TableCell>Category</TableCell>
-                          <TableCell>Confidence</TableCell>
-                          <TableCell>Status</TableCell>
-                          <TableCell align="right">Action</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {leadResponse.leads.map((lead) => (
-                          <TableRow hover key={lead.id} sx={{ cursor: 'pointer' }} onClick={() => openLeadDetails(lead)}>
-                            <TableCell>{lead.company_name ?? '-'}</TableCell>
-                            <TableCell>{buildContactName(lead)}</TableCell>
-                            <TableCell>{lead.role ?? lead.title ?? '-'}</TableCell>
-                            <TableCell>{lead.email ?? '-'}</TableCell>
-                            <TableCell>{lead.country ?? '-'}</TableCell>
-                            <TableCell>{lead.category ?? '-'}</TableCell>
-                            <TableCell>{leadConfidence(lead).toFixed(2)}</TableCell>
-                            <TableCell onClick={(event) => event.stopPropagation()}>
-                              {lead.archived ? (
-                                <Typography variant="body2" color="text.secondary">
-                                  Archived
-                                </Typography>
-                              ) : (
-                                <TextField
-                                  select
-                                  size="small"
-                                  variant="standard"
-                                  value={lead.status ?? 'New'}
-                                  onChange={(event) => {
-                                    void handleLeadPatch(lead.id, { status: event.target.value }, `Updated lead #${lead.id} status`)
-                                  }}
-                                  sx={{ minWidth: 120 }}
-                                >
-                                  {leadStatusOptions.map((status) => (
-                                    <MenuItem key={status} value={status}>
-                                      {status}
-                                    </MenuItem>
-                                  ))}
-                                </TextField>
-                              )}
-                            </TableCell>
-                            <TableCell align="right">
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  void handleArchiveToggle(lead)
-                                }}
-                              >
-                                {lead.archived ? 'Restore' : 'Archive'}
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        {leadResponse.leads.length === 0 && (
-                          <TableRow>
-                            <TableCell colSpan={9}>
-                              <Typography variant="body2" color="text.secondary">
-                                No leads match the current filters.
-                              </Typography>
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                  <Stack spacing={1.25}>
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                      <Typography variant="caption" color="text.secondary">
+                        Country
+                      </Typography>
+                      <Chip
+                        label="All"
+                        size="small"
+                        color={countryFilter ? 'default' : 'primary'}
+                        variant={countryFilter ? 'outlined' : 'filled'}
+                        onClick={() => {
+                          setCountryFilter('')
+                          setLeadPage(1)
+                        }}
+                      />
+                      {countryOptions.map((option) => (
+                        <Chip
+                          key={option}
+                          label={option}
+                          size="small"
+                          color={countryFilter === option ? 'primary' : 'default'}
+                          variant={countryFilter === option ? 'filled' : 'outlined'}
+                          onClick={() => {
+                            setCountryFilter(option)
+                            setLeadPage(1)
+                          }}
+                        />
+                      ))}
+                    </Stack>
 
-                  <Stack direction="row" justifyContent="center">
-                    <Pagination
-                      color="primary"
-                      page={leadPage}
-                      count={totalLeadPages}
-                      onChange={(_, value) => setLeadPage(value)}
-                    />
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                      <Typography variant="caption" color="text.secondary">
+                        Status
+                      </Typography>
+                      <Chip
+                        label="All"
+                        size="small"
+                        color={statusFilter ? 'default' : 'primary'}
+                        variant={statusFilter ? 'outlined' : 'filled'}
+                        onClick={() => {
+                          setStatusFilter('')
+                          setLeadPage(1)
+                        }}
+                      />
+                      {statusOptions.map((option) => (
+                        <Chip
+                          key={option}
+                          label={option}
+                          size="small"
+                          color={statusFilter === option ? 'primary' : 'default'}
+                          variant={statusFilter === option ? 'filled' : 'outlined'}
+                          onClick={() => {
+                            setStatusFilter(option)
+                            setLeadPage(1)
+                          }}
+                        />
+                      ))}
+                    </Stack>
+
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                      <Typography variant="caption" color="text.secondary">
+                        Category
+                      </Typography>
+                      <Chip
+                        label="All"
+                        size="small"
+                        color={categoryFilter ? 'default' : 'primary'}
+                        variant={categoryFilter ? 'outlined' : 'filled'}
+                        onClick={() => {
+                          setCategoryFilter('')
+                          setLeadPage(1)
+                        }}
+                      />
+                      {categoryOptions.map((option) => (
+                        <Chip
+                          key={option}
+                          label={option}
+                          size="small"
+                          color={categoryFilter === option ? 'primary' : 'default'}
+                          variant={categoryFilter === option ? 'filled' : 'outlined'}
+                          onClick={() => {
+                            setCategoryFilter(option)
+                            setLeadPage(1)
+                          }}
+                        />
+                      ))}
+                    </Stack>
                   </Stack>
+
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gap: 2,
+                      gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 2fr) minmax(320px, 1fr)' },
+                    }}
+                  >
+                    <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'rgba(255,255,255,0.02)' }}>
+                      <Table size="small" stickyHeader>
+                        <TableHead>
+                          <TableRow>
+                            {[
+                              ['Company', 'company_name'],
+                              ['Contact', 'contact_name'],
+                              ['Role', 'role'],
+                              ['Email', 'email'],
+                              ['City', 'city'],
+                              ['Country', 'country'],
+                              ['Category', 'category'],
+                              ['Confidence', 'confidence'],
+                              ['Status', 'status'],
+                              ['Created', 'created_at'],
+                            ].map(([label, field]) => (
+                              <TableCell key={field} sortDirection={leadSortBy === field ? leadSortDir : false}>
+                                <TableSortLabel
+                                  active={leadSortBy === field}
+                                  direction={leadSortBy === field ? leadSortDir : 'asc'}
+                                  onClick={() => handleLeadSort(field as LeadSortField)}
+                                >
+                                  {label}
+                                </TableSortLabel>
+                              </TableCell>
+                            ))}
+                            <TableCell align="right">Action</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {leadResponse.leads.map((lead) => (
+                            <TableRow hover key={lead.id} sx={{ cursor: 'pointer' }} onClick={() => openLeadDetails(lead)}>
+                              <TableCell>{lead.company_name ?? '-'}</TableCell>
+                              <TableCell>{buildContactName(lead)}</TableCell>
+                              <TableCell>{lead.role ?? lead.title ?? '-'}</TableCell>
+                              <TableCell>{lead.email ?? '-'}</TableCell>
+                              <TableCell>{lead.city ?? '-'}</TableCell>
+                              <TableCell>{lead.country ?? '-'}</TableCell>
+                              <TableCell>{lead.category ?? '-'}</TableCell>
+                              <TableCell>{leadConfidence(lead).toFixed(2)}</TableCell>
+                              <TableCell onClick={(event) => event.stopPropagation()}>
+                                {lead.archived ? (
+                                  <Typography variant="body2" color="text.secondary">
+                                    Archived
+                                  </Typography>
+                                ) : (
+                                  <TextField
+                                    select
+                                    size="small"
+                                    variant="standard"
+                                    value={lead.status ?? 'New'}
+                                    onChange={(event) => {
+                                      void handleLeadPatch(
+                                        lead.id,
+                                        { status: event.target.value },
+                                        `Updated lead #${lead.id} status`,
+                                      )
+                                    }}
+                                    sx={{ minWidth: 120 }}
+                                  >
+                                    {leadStatusOptions.map((status) => (
+                                      <MenuItem key={status} value={status}>
+                                        {status}
+                                      </MenuItem>
+                                    ))}
+                                  </TextField>
+                                )}
+                              </TableCell>
+                              <TableCell>{formatDateTime(lead.created_at)}</TableCell>
+                              <TableCell align="right">
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    void handleArchiveToggle(lead)
+                                  }}
+                                >
+                                  {lead.archived ? 'Restore' : 'Archive'}
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          {leadResponse.leads.length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={11}>
+                                <Typography variant="body2" color="text.secondary">
+                                  No leads match the current filters.
+                                </Typography>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                      <TablePagination
+                        component="div"
+                        count={leadResponse.total}
+                        page={Math.max(leadPage - 1, 0)}
+                        onPageChange={(_, page) => setLeadPage(page + 1)}
+                        rowsPerPage={leadRowsPerPage}
+                        onRowsPerPageChange={handleLeadRowsPerPageChange}
+                        rowsPerPageOptions={[10, 25, 50, 100]}
+                      />
+                    </TableContainer>
+
+                    <Paper variant="outlined" sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.02)' }}>
+                      <Stack spacing={1.5}>
+                        <Stack direction="row" justifyContent="space-between" spacing={1}>
+                          <Box>
+                            <Typography variant="h6">Live scrape feed</Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              New leads and scrape progress appear here as soon as the backend emits them.
+                            </Typography>
+                          </Box>
+                          <Chip
+                            label={terminalBusy ? `Live: ${liveScrapeLeadCount}` : 'Idle'}
+                            color={terminalBusy ? 'warning' : 'default'}
+                            variant={terminalBusy ? 'filled' : 'outlined'}
+                          />
+                        </Stack>
+
+                        <Stack spacing={1}>
+                          {liveScrapeMessages.length > 0 ? (
+                            liveScrapeMessages.map((message, index) => (
+                              <Alert key={`${message}-${index}`} severity={message.startsWith('Error:') ? 'error' : 'info'} variant="outlined">
+                                {message}
+                              </Alert>
+                            ))
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">
+                              Start a scrape from the terminal to stream progress and freshly found leads here.
+                            </Typography>
+                          )}
+                        </Stack>
+
+                        <Divider />
+
+                        <Stack spacing={1.25}>
+                          {liveScrapeFeed.map((lead, index) => (
+                            <Paper key={`${lead.company_name}-${lead.received_at}-${index}`} variant="outlined" sx={{ p: 1.25 }}>
+                              <Stack spacing={0.5}>
+                                <Stack direction="row" justifyContent="space-between" spacing={1}>
+                                  <Typography variant="subtitle2">{lead.company_name || '?'}</Typography>
+                                  <Chip label={lead.confidence.toFixed(2)} size="small" color="primary" variant="outlined" />
+                                </Stack>
+                                <Typography variant="body2" color="text.secondary">
+                                  {[lead.email || '-', [lead.city, lead.country].filter(Boolean).join(', ') || '-', lead.category || '-'].join(' - ')}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {formatRelativeTime(lead.received_at)}
+                                </Typography>
+                              </Stack>
+                            </Paper>
+                          ))}
+                          {liveScrapeFeed.length === 0 && (
+                            <Typography variant="body2" color="text.secondary">
+                              No live leads yet.
+                            </Typography>
+                          )}
+                        </Stack>
+                      </Stack>
+                    </Paper>
+                  </Box>
                 </Stack>
               )}
 
@@ -1967,6 +2541,7 @@ function App() {
                   ['City', leadDetail.city ?? '-'],
                   ['Country', leadDetail.country ?? '-'],
                   ['Confidence', leadConfidence(leadDetail).toFixed(2)],
+                  ['Created', formatDateTime(leadDetail.created_at)],
                   ['Website', leadDetail.website ?? '-'],
                   ['Owner', leadDetail.owner ?? '-'],
                   ['Last touch', leadDetail.last_touch ?? '-'],
@@ -2105,6 +2680,36 @@ function App() {
                     setConfigDraft((current) => ({
                       ...current,
                       ai_confidence_threshold: Number.parseFloat(event.target.value) || 0,
+                    }))
+                  }
+                />
+                <TextField
+                  label="Default country filter"
+                  value={configDraft.leads_default_country}
+                  onChange={(event) =>
+                    setConfigDraft((current) => ({
+                      ...current,
+                      leads_default_country: event.target.value,
+                    }))
+                  }
+                />
+                <TextField
+                  label="Default status filter"
+                  value={configDraft.leads_default_status}
+                  onChange={(event) =>
+                    setConfigDraft((current) => ({
+                      ...current,
+                      leads_default_status: event.target.value,
+                    }))
+                  }
+                />
+                <TextField
+                  label="Default category filter"
+                  value={configDraft.leads_default_category}
+                  onChange={(event) =>
+                    setConfigDraft((current) => ({
+                      ...current,
+                      leads_default_category: event.target.value,
                     }))
                   }
                 />

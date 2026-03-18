@@ -8,16 +8,21 @@ The new shell is MUI-based and intentionally feature-shaped:
 - fixed top bar with API health status
 - permanent navigation rail on desktop
 - tighter summary cards and a wider terminal pane
+- hero row now includes the Monster logo in its own panel beside the main dashboard shell copy
 - terminal text reduced for denser operator output
 - hero metric cards now use a label/value row with circular, metric-colored counters
 - hero metric labels are larger and bolder
 - pipeline overview tiles reuse the same metric card treatment in a compact size
 - runtime stats are now shown as compact KPI cards with label/value on the same row
 - leads table with search and detail drawer
+- MUI data table with sticky headers, sortable columns, and rows-per-page controls
+- filter chips for country, status, and category
 - editable lead status from the table and detail drawer
 - editable lead notes in the detail drawer
 - separate city and country fields in the lead detail drawer
-- lead pagination
+- created timestamp visible in the table and detail drawer
+- live scrape feed that streams progress and newly found leads during a run
+- lead pagination with server-backed sorting and page size
 - session drawer and settings dialog
 - embedded `react-terminal` chat panel
 - DB init/reset and export actions exposed in the React UI
@@ -55,10 +60,14 @@ The left navigation now syncs the active tab and scrolls the main content sectio
 
 - Search box queries `GET /api/leads`
 - Pagination uses the `page`/`page_size` response from `GET /api/leads`
+- Default page size comes from the `LEADS_PAGE_SIZE` environment variable unless the user changes it in the table footer
+- Country, status, and category chips apply backend filters and are remembered per session in the browser
 - Archive toggle calls `PATCH /api/leads/{id}/archive`
 - Status select calls `PATCH /api/leads/{id}`
 - Export button opens `GET /api/leads/export`
-- Table shows company, contact, role, email, country, category, confidence, and status
+- Table shows company, contact, role, email, city, country, category, confidence, status, and created time
+- Column headers drive backend sorting via MUI `TableSortLabel`
+- A live scrape feed beside the table shows progress messages and new leads immediately while `/api/scrape` is running
 - Clicking a row opens a lead detail drawer
 
 ### Terminal tab
@@ -103,6 +112,10 @@ Settings now reads and writes the live config via:
 - Port the remaining legacy Python-only flows so `/dashboard/` can replace `/`
 - Add richer run history and session history browsing beyond the current summary panels
 - Add more lead-sheet field editing once the API contract is stable for those fields
+- Decide whether live scrape feed history should persist per session or remain an in-memory operator view only
+- Add server-side filter option lists so country/status/category chips are not limited to values present on the current page
+- Normalize stored country values consistently (for example `GB` -> `United Kingdom`) so filters and exports stay coherent
+- Show the current DuckDuckGo result-page cursor in the live scrape feed so operators can see how deep a repeated search has progressed
 
 ## Live data boundary
 
@@ -117,6 +130,7 @@ The React shell now uses the existing FastAPI contract directly:
 - `PATCH /api/sessions/{id}/rename`
 - `GET /api/sessions/{id}/history`
 - `GET /api/leads`
+- `GET /api/leads?page=&page_size=&search=&include_archived=&sort_by=&sort_dir=&country=&status=&category=`
 - `PATCH /api/leads/{id}`
 - `GET /api/leads/export`
 - `PATCH /api/leads/{id}/archive`

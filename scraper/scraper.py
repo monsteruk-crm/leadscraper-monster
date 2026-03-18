@@ -74,16 +74,17 @@ class LeadScraper:
 
     # ── Public step functions ─────────────────────────────────────────────────
 
-    async def search_sites(self, keywords: str) -> list[str]:
-        logger.info("Searching: %r", keywords)
-        urls = await search_duckduckgo(
+    async def search_sites(self, keywords: str, start_page: int = 0) -> tuple[list[str], int]:
+        logger.info("Searching: %r from page %d", keywords, start_page + 1)
+        urls, next_page = await search_duckduckgo(
             self._session,
             keywords,
             max_pages=cfg.MAX_PAGES,
             delay=cfg.REQUEST_DELAY_SECONDS,
+            start_page=start_page,
         )
         logger.info("Found %d candidate URLs", len(urls))
-        return urls
+        return urls, next_page
 
     async def fetch_page(self, url: str) -> Optional[str]:
         if cfg.RESPECT_ROBOTS_TXT and not await self._robots_allowed(url):
@@ -114,6 +115,8 @@ class LeadScraper:
         existing_keys: Set[str],
         on_lead: Callable,           # async (lead, session_id) -> None
         on_progress: Callable,       # async (run_id, pages, new_leads) -> None
+        search_offsets: dict[str, int],
+        on_search_progress: Callable,  # async (keyword, next_page) -> None
         target_new_leads: int = 0,
         run_id: Optional[int] = None,
         session_id: Optional[int] = None,
@@ -126,6 +129,8 @@ class LeadScraper:
             existing_keys:    Pre-loaded set of known dedupe keys.
             on_lead:          Async callback called with (lead, session_id) after save.
             on_progress:      Async callback called with (run_id, pages, new_leads).
+            search_offsets:   Persisted DDG result-page cursor per keyword.
+            on_search_progress: Async callback called with (keyword, next_page).
             target_new_leads: Stop early once this many new leads are found (0 = off).
             run_id:           DB run record id.
             session_id:       Current session id.
@@ -138,10 +143,16 @@ class LeadScraper:
             if target_reached:
                 break
 
-            yield LeadEvent("progress", {"msg": f"Searching: {kw}", "phase": "search"})
+            start_page = search_offsets.get(kw, 0)
+            search_msg = f"Searching: {kw}"
+            if start_page > 0:
+                search_msg += f" (resuming from results page {start_page + 1})"
+            yield LeadEvent("progress", {"msg": search_msg, "phase": "search"})
 
             try:
-                urls = await self.search_sites(kw)
+                urls, next_page = await self.search_sites(kw, start_page=start_page)
+                search_offsets[kw] = next_page
+                await on_search_progress(kw, next_page)
             except Exception as exc:
                 yield LeadEvent("error", {"msg": f"Search failed for '{kw}': {exc}"})
                 continue

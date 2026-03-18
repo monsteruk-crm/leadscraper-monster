@@ -45,6 +45,12 @@ _COUNTRY_ALIASES = {
     "uae": "United Arab Emirates",
 }
 
+_ADDRESS_HINT_RE = re.compile(
+    r"\b(?:street|st\.?|road|rd\.?|avenue|ave\.?|lane|ln\.?|close|court|ct\.?|"
+    r"drive|dr\.?|boulevard|blvd\.?|suite|unit|floor)\b",
+    re.I,
+)
+
 
 def parse_lead_info(html: str, source_url: str) -> Optional[Lead]:
     """Extract a Lead from a raw HTML page.
@@ -194,7 +200,12 @@ def _extract_location_from_html(soup: BeautifulSoup) -> tuple[str, str]:
 
 
 def _clean_location_value(value: object) -> str:
-    return str(value).strip() if value else ""
+    raw = str(value).strip() if value else ""
+    if not raw:
+        return ""
+    if any(char.isdigit() for char in raw) and _ADDRESS_HINT_RE.search(raw):
+        return ""
+    return raw
 
 
 def _normalize_country(value: object) -> str:

@@ -62,6 +62,9 @@ class ConfigUpdate(BaseModel):
     request_delay_seconds: float = 1.5
     ai_enrichment_enabled: bool = True
     ai_confidence_threshold: float = 0.0
+    leads_default_country: str = ""
+    leads_default_status: str = ""
+    leads_default_category: str = ""
 
 
 class LeadUpdate(BaseModel):
@@ -287,6 +290,7 @@ async def scrape(body: ScrapeRequest):
             visited = await db.get_visited_urls()
             existing_keys = await db.get_dedupe_keys()
             run_id = await db.start_run(session_id, keywords)
+            search_offsets = {keyword: await db.get_search_progress(keyword) for keyword in keywords}
         except Exception as exc:
             yield f"data: {json.dumps({'type':'error','content':f'DB init failed: {exc}'})}\n\n"
             return
@@ -297,6 +301,9 @@ async def scrape(body: ScrapeRequest):
 
         async def on_progress(rid, pages, new):
             await db.update_run_progress(rid, pages, new)
+
+        async def on_search_progress(keyword: str, next_page: int):
+            await db.set_search_progress(keyword, next_page)
 
         kw_str = ", ".join(keywords)
         await db.add_turn(session_id, "user", f"/scrape {kw_str}", "scrape")
@@ -311,6 +318,8 @@ async def scrape(body: ScrapeRequest):
                     existing_keys=existing_keys,
                     on_lead=on_lead,
                     on_progress=on_progress,
+                    search_offsets=search_offsets,
+                    on_search_progress=on_search_progress,
                     target_new_leads=cfg.TARGET_NEW_LEADS,
                     run_id=run_id,
                     session_id=session_id,
@@ -357,13 +366,33 @@ async def scrape(body: ScrapeRequest):
 @app.get("/api/leads")
 async def get_leads(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(cfg.LEADS_PAGE_SIZE, ge=1, le=200),
     search: str = Query(""),
     include_archived: bool = Query(False),
+    sort_by: str = Query("created_at"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
+    country: str = Query(""),
+    status: str = Query(""),
+    category: str = Query(""),
 ):
-    leads, total = await db.get_leads(page, page_size, search, include_archived)
+    leads, total = await db.get_leads(
+        page,
+        page_size,
+        search,
+        include_archived,
+        sort_by,
+        sort_dir,
+        country,
+        status,
+        category,
+    )
     return json.loads(json.dumps({
-        "leads": leads, "total": total, "page": page, "page_size": page_size,
+        "leads": leads,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "sort_by": sort_by,
+        "sort_dir": sort_dir,
     }, default=_json_serial))
 
 

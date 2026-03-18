@@ -8,6 +8,16 @@ from __future__ import annotations
 
 import os
 
+
+def _get_int_env(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
 # ── OpenAI ───────────────────────────────────────────────────────────────────
 OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
@@ -32,6 +42,9 @@ AI_CONFIDENCE_THRESHOLD: float = 0.3
 
 # ── Search goals ──────────────────────────────────────────────────────────────
 TARGET_NEW_LEADS: int = 0
+
+# ── Dashboard / Leads UI ─────────────────────────────────────────────────────
+LEADS_PAGE_SIZE: int = _get_int_env("LEADS_PAGE_SIZE", 25)
 
 # ── Database ─────────────────────────────────────────────────────────────────
 DATABASE_URL: str = os.environ.get("DATABASE_URL", "")

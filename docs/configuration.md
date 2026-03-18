@@ -9,6 +9,7 @@ Set these in Vercel project settings (Production/Preview/Development) or in a lo
 | `DATABASE_URL` | Yes | — | PostgreSQL connection string (e.g. `postgresql://user:pass@host/db`) |
 | `OPENAI_API_KEY` | Yes | — | OpenAI API key; without it AI enrichment is disabled |
 | `OPENAI_MODEL` | No | `gpt-4o-mini` | OpenAI model used for enrichment and LeadBot chat |
+| `LEADS_PAGE_SIZE` | No | `25` | Default rows per page for `GET /api/leads` and the React MUI table |
 
 **Important:** Never commit `.env` to git. Add `.env` to `.gitignore`.
 
@@ -24,6 +25,9 @@ These are persisted in the `settings` table (single row, `id=1`) and can be chan
 | `request_delay_seconds` | float | `1.5` | Seconds to wait between HTTP requests (politeness) |
 | `ai_enrichment_enabled` | bool | `true` | Toggle OpenAI enrichment on/off |
 | `ai_confidence_threshold` | float | `0.3` | Discard leads with confidence below this value (0.0 = keep all) |
+| `leads_default_country` | str | `""` | Default country chip used when no per-session browser preference exists |
+| `leads_default_status` | str | `""` | Default status chip used when no per-session browser preference exists |
+| `leads_default_category` | str | `""` | Default category chip used when no per-session browser preference exists |
 
 DB settings are loaded at the start of every scrape run via `db.apply_settings_to_config()`, overriding the module-level defaults in `config/config.py`.
 

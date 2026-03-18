@@ -79,6 +79,7 @@ Dataclasses shared across all scraper modules.
 
 - The DB/export path now aligns to `company_name, website, country, city, contact_name, role, email, source_url, category, size/signals, notes, confidence, status, owner, last_touch, opt_out`
 - Internal operational columns still exist where needed (`id`, `phone`, `dedupe_key`, `created_at`, `session_id`, `archived`)
+- `created_at` is now exposed in the React leads table and is the default sort key for `GET /api/leads`
 - The app intentionally avoids a migration path here; schema changes are expected to be applied with a destructive reset via `/api/db/reset`
 
 **`ScrapeResult`** — aggregates counts for one run: `leads_new`, `leads_duplicate`, `leads_discarded`, `pages_visited`.
@@ -91,7 +92,7 @@ Controlled by `cfg.MAX_PAGES` and `cfg.REQUEST_DELAY_SECONDS`.
 Parses raw HTML into a `Lead`:
 1. Scans `<a href="mailto:">` and `<a href="tel:">` links **before** noise removal.
 2. Extracts `city` and `country` from schema.org JSON-LD (`addressLocality`/`addressCountry`), microdata (`itemprop`), and `geo.placename` meta tags.
-3. Normalizes common country aliases (`GB`, `UK`, `US`, etc.) and splits combined place strings when a page exposes city/country in one meta field.
+3. Normalizes common country aliases (`GB`, `UK`, `US`, etc.), splits combined place strings when a page exposes city/country in one meta field, and drops obvious street-address strings from the `city` field.
 4. Extracts company name from `<title>`, `<meta og:site_name>`, and schema.org JSON-LD.
 5. Tries to split `contact_name` into `first_name` / `last_name` via schema.org `Person` markup.
 6. Falls back to regex patterns for email / phone in body text.
@@ -125,9 +126,12 @@ Async PostgreSQL layer via `asyncpg`. Uses a module-level connection pool (re-us
 | `leads` | Scraped leads, unique on `dedupe_key` |
 | `visited_urls` | Every URL ever fetched (prevents re-scraping) |
 | `search_runs` | Log of every scrape run with stats |
+| `search_progress` | Per-keyword DuckDuckGo result-page cursor for resumed searches |
 | `settings` | Single-row config (id=1, singleton constraint) |
 
 Key functions: `init_db()`, `reset_db()`, `_close_pool()`, `insert_lead()`, `get_leads()`, `export_leads_csv()`, `get_stats()`.
+
+`get_leads()` now supports server-side pagination, backend filters (`country`, `status`, `category`), and a whitelisted sort contract (`company_name`, `contact_name`, `role`, `email`, `city`, `country`, `category`, `confidence`, `status`, `created_at`). Search also includes `city`.
 
 ### `config/config.py`
 Reads environment variables and exposes mutable module-level globals.
@@ -138,13 +142,15 @@ See [configuration.md](configuration.md) for the full variable list.
 
 ```
 search_duckduckgo(keyword)
-    → [candidate URLs]
+    → [candidate URLs, next DDG page cursor]
         → fetch_page(url)         [aiohttp, robots.txt check, delay]
             → parse_lead_info()   [BeautifulSoup4, JSON-LD, mailto/tel]
                 → enrich_lead()   [OpenAI gpt-4o-mini, structured JSON]
                     → deduplicate [dedupe_key in existing_keys set]
                         → on_lead callback → db.insert_lead()
                             → yield LeadEvent("lead", {...})  [SSE]
+
+The scraper stores the next DuckDuckGo result page per keyword in `search_progress`, so rerunning the same search continues deeper through results instead of starting at page 1 every time.
 ```
 
 ## SSE Event Types

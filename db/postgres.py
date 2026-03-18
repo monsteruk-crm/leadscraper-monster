@@ -156,6 +156,13 @@ CREATE TABLE IF NOT EXISTS search_runs (
     finished_at      TIMESTAMPTZ
 );
 
+CREATE TABLE IF NOT EXISTS search_progress (
+    keyword          TEXT PRIMARY KEY,
+    next_page        INTEGER NOT NULL DEFAULT 0,
+    updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_search_progress_updated ON search_progress(updated_at);
+
 CREATE TABLE IF NOT EXISTS settings (
     id                      INTEGER PRIMARY KEY DEFAULT 1,
     keywords                JSONB   NOT NULL DEFAULT '["sustainable packaging suppliers UK"]',
@@ -164,47 +171,55 @@ CREATE TABLE IF NOT EXISTS settings (
     request_delay_seconds   REAL    NOT NULL DEFAULT 1.5,
     ai_enrichment_enabled   BOOLEAN NOT NULL DEFAULT true,
     ai_confidence_threshold REAL    NOT NULL DEFAULT 0.0,
+    leads_default_country   TEXT    NOT NULL DEFAULT '',
+    leads_default_status    TEXT    NOT NULL DEFAULT '',
+    leads_default_category  TEXT    NOT NULL DEFAULT '',
     CONSTRAINT settings_singleton CHECK (id = 1)
 );
 
 -- Ensure the settings row exists (do not overwrite user-saved values on re-init)
 INSERT INTO settings (
     id, keywords, max_pages, target_new_leads,
-    request_delay_seconds, ai_enrichment_enabled, ai_confidence_threshold
+    request_delay_seconds, ai_enrichment_enabled, ai_confidence_threshold,
+    leads_default_country, leads_default_status, leads_default_category
 ) VALUES (
     1,
     '["sustainable packaging suppliers UK",
       "eco packaging manufacturer UK",
       "B2B packaging solutions England",
       "green packaging company UK"]',
-    3, 0, 1.5, true, 0.3
+    3, 0, 1.5, true, 0.3, '', '', ''
 ) ON CONFLICT DO NOTHING;
 """
 
 
 _DROP_DDL = """
-DROP TABLE IF EXISTS chat_turns, leads, visited_urls, search_runs, settings, sessions CASCADE;
+DROP TABLE IF EXISTS chat_turns, leads, visited_urls, search_runs, search_progress, settings, sessions CASCADE;
 """
 
 # After a full reset we always restore settings to a clean seed (UPSERT).
 _SEED_SETTINGS = """
 INSERT INTO settings (
     id, keywords, max_pages, target_new_leads,
-    request_delay_seconds, ai_enrichment_enabled, ai_confidence_threshold
+    request_delay_seconds, ai_enrichment_enabled, ai_confidence_threshold,
+    leads_default_country, leads_default_status, leads_default_category
 ) VALUES (
     1,
     '["sustainable packaging suppliers UK",
       "eco packaging manufacturer UK",
       "B2B packaging solutions England",
       "green packaging company UK"]',
-    3, 0, 1.5, true, 0.3
+    3, 0, 1.5, true, 0.3, '', '', ''
 ) ON CONFLICT (id) DO UPDATE SET
     keywords                = EXCLUDED.keywords,
     max_pages               = EXCLUDED.max_pages,
     target_new_leads        = EXCLUDED.target_new_leads,
     request_delay_seconds   = EXCLUDED.request_delay_seconds,
     ai_enrichment_enabled   = EXCLUDED.ai_enrichment_enabled,
-    ai_confidence_threshold = EXCLUDED.ai_confidence_threshold;
+    ai_confidence_threshold = EXCLUDED.ai_confidence_threshold,
+    leads_default_country   = EXCLUDED.leads_default_country,
+    leads_default_status    = EXCLUDED.leads_default_status,
+    leads_default_category  = EXCLUDED.leads_default_category;
 """
 
 
@@ -248,7 +263,10 @@ async def save_settings(s: dict[str, Any]) -> None:
                 target_new_leads        = $3,
                 request_delay_seconds   = $4,
                 ai_enrichment_enabled   = $5,
-                ai_confidence_threshold = $6
+                ai_confidence_threshold = $6,
+                leads_default_country   = $7,
+                leads_default_status    = $8,
+                leads_default_category  = $9
             WHERE id = 1
         """,
             json.dumps(s.get("keywords", _default_settings()["keywords"])),
@@ -257,6 +275,9 @@ async def save_settings(s: dict[str, Any]) -> None:
             float(s.get("request_delay_seconds", 1.5)),
             bool(s.get("ai_enrichment_enabled", True)),
             float(s.get("ai_confidence_threshold", 0.0)),
+            str(s.get("leads_default_country", "")),
+            str(s.get("leads_default_status", "")),
+            str(s.get("leads_default_category", "")),
         )
 
 
@@ -273,6 +294,9 @@ def _default_settings() -> dict[str, Any]:
         "request_delay_seconds": 1.5,
         "ai_enrichment_enabled": True,
         "ai_confidence_threshold": 0.3,
+        "leads_default_country": "",
+        "leads_default_status": "",
+        "leads_default_category": "",
     }
 
 
@@ -438,30 +462,69 @@ async def get_leads(
     page_size: int = 50,
     search: str = "",
     include_archived: bool = False,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+    country_filter: str = "",
+    status_filter: str = "",
+    category_filter: str = "",
 ) -> tuple[list[dict], int]:
     """Return (leads, total_count) for the given page."""
     offset = (page - 1) * page_size
+    sort_columns = {
+        "company_name": "company_name",
+        "contact_name": "contact_name",
+        "role": "role",
+        "email": "email",
+        "country": "country",
+        "city": "city",
+        "category": "category",
+        "confidence": "confidence",
+        "status": "status",
+        "created_at": "created_at",
+    }
+    resolved_sort_by = sort_columns.get(sort_by, "created_at")
+    resolved_sort_dir = "ASC" if sort_dir.lower() == "asc" else "DESC"
+    order_clause = f"ORDER BY {resolved_sort_by} {resolved_sort_dir}, id DESC"
     async with get_conn() as conn:
-        base_where = "" if include_archived else "AND archived = false"
+        filters: list[str] = []
+        filter_args: list[Any] = []
+
+        if not include_archived:
+            filters.append("archived = false")
+
         if search:
-            where = (
-                "WHERE ("
-                "company_name ILIKE $3 OR contact_name ILIKE $3 OR role ILIKE $3 OR "
-                "email ILIKE $3 OR category ILIKE $3 OR country ILIKE $3 OR status ILIKE $3"
-                f") {base_where}"
+            filter_args.append(f"%{search}%")
+            idx = len(filter_args)
+            filters.append(
+                "("
+                f"company_name ILIKE ${idx} OR contact_name ILIKE ${idx} OR role ILIKE ${idx} OR "
+                f"email ILIKE ${idx} OR category ILIKE ${idx} OR country ILIKE ${idx} OR city ILIKE ${idx} "
+                f"OR status ILIKE ${idx}"
+                ")"
             )
-            args = [page_size, offset, f"%{search}%"]
-        else:
-            where = f"WHERE true {base_where}"
-            args = [page_size, offset]
+
+        if country_filter:
+            filter_args.append(country_filter)
+            filters.append(f"country = ${len(filter_args)}")
+
+        if status_filter:
+            filter_args.append(status_filter)
+            filters.append(f"status = ${len(filter_args)}")
+
+        if category_filter:
+            filter_args.append(category_filter)
+            filters.append(f"category = ${len(filter_args)}")
+
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
 
         total = await conn.fetchval(
-            f"SELECT COUNT(*) FROM leads {where.replace('$3', '$1')}",
-            *([f"%{search}%"] if search else []),
+            f"SELECT COUNT(*) FROM leads {where_clause}",
+            *filter_args,
         )
+        page_args = filter_args + [page_size, offset]
         rows = await conn.fetch(
-            f"SELECT * FROM leads {where} ORDER BY id DESC LIMIT $1 OFFSET $2",
-            *args,
+            f"SELECT * FROM leads {where_clause} {order_clause} LIMIT ${len(page_args) - 1} OFFSET ${len(page_args)}",
+            *page_args,
         )
         return [dict(r) for r in rows], total
 
@@ -577,6 +640,30 @@ async def finish_run(
                 leads_discarded=$4, finished_at=NOW()
             WHERE id=$5
         """, pages_crawled, leads_new, leads_duplicate, leads_discarded, run_id)
+
+
+async def get_search_progress(keyword: str) -> int:
+    async with get_conn() as conn:
+        value = await conn.fetchval(
+            "SELECT next_page FROM search_progress WHERE keyword = $1",
+            keyword,
+        )
+        return int(value or 0)
+
+
+async def set_search_progress(keyword: str, next_page: int) -> None:
+    async with get_conn() as conn:
+        await conn.execute(
+            """
+            INSERT INTO search_progress (keyword, next_page, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (keyword) DO UPDATE SET
+                next_page = EXCLUDED.next_page,
+                updated_at = NOW()
+            """,
+            keyword,
+            max(0, int(next_page)),
+        )
 
 
 async def list_runs(limit: int = 50) -> list[dict]:

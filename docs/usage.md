@@ -24,6 +24,7 @@ npm install -g vercel
 #    DATABASE_URL=postgresql://...
 #    OPENAI_API_KEY=sk-...
 #    OPENAI_MODEL=gpt-4o-mini   # optional
+#    LEADS_PAGE_SIZE=25         # optional
 
 # 5. Run locally — mirrors the production serverless environment
 vercel dev -L
@@ -116,6 +117,20 @@ The new React dashboard uses this endpoint as its first live API check.
 | `PATCH` | `/api/leads/{id}` | Update editable lead fields such as status and notes |
 | `GET` | `/api/leads/export` | Download all leads as CSV |
 | `PATCH` | `/api/leads/{id}/archive` | Archive or restore a lead |
+
+`GET /api/leads` supports these query parameters:
+
+- `page`
+- `page_size`
+- `search`
+- `include_archived`
+- `sort_by` (`company_name`, `contact_name`, `role`, `email`, `city`, `country`, `category`, `confidence`, `status`, `created_at`)
+- `sort_dir` (`asc`, `desc`)
+- `country`
+- `status`
+- `category`
+
+Repeated `/api/scrape` runs with the same keyword now resume from a deeper DuckDuckGo results page instead of starting again from page 1, until the result set is exhausted and the cursor resets.
 
 ### Stats & Runs
 | Method | Path | Description |
