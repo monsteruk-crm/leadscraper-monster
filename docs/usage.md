@@ -108,7 +108,7 @@ The new React dashboard uses this endpoint as its first live API check.
 ### Scrape
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/scrape` | Run scraping pipeline, stream LeadEvents as SSE |
+| `POST` | `/api/scrape` | Run scraping pipeline, stream LeadEvents as SSE, and semantically resume previous query depth by default |
 
 ### Leads
 | Method | Path | Description |
@@ -131,6 +131,21 @@ The new React dashboard uses this endpoint as its first live API check.
 - `category`
 
 Repeated `/api/scrape` runs with the same keyword now resume from a deeper DuckDuckGo results page instead of starting again from page 1, until the result set is exhausted and the cursor resets.
+
+Near-duplicate queries can now resume too: semantic lookup (`pg_trgm`) can map a new query to the closest historical query and continue from that stored depth when similarity exceeds the threshold.
+
+`POST /api/scrape` request body also supports:
+
+- `semantic_resume` (bool, default `true`) — enables semantic history matching for query resume depth.
+- `similarity_threshold` (float, default `0.32`) — pg_trgm similarity threshold for semantic query matches.
+
+New retrieval endpoints for search-depth history:
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/search-history` | Return semantic matches for a query (`query`, `limit`, `similarity_threshold`) |
+| `POST` | `/api/search-history/resolve` | Resolve the single best resume cursor for a query |
+
 
 ### Stats & Runs
 | Method | Path | Description |

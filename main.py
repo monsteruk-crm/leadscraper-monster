@@ -48,6 +48,8 @@ class ScrapeRequest(BaseModel):
     session_id: Optional[int] = None
     max_pages: Optional[int] = None
     target_new_leads: int = 0
+    semantic_resume: bool = True
+    similarity_threshold: float = 0.32
 
 class SessionCreate(BaseModel):
     name: Optional[str] = None
@@ -75,6 +77,11 @@ class LeadUpdate(BaseModel):
     owner: Optional[str] = None
     last_touch: Optional[str] = None
     opt_out: Optional[bool] = None
+
+
+class SearchHistoryResolveRequest(BaseModel):
+    query: str
+    similarity_threshold: float = 0.32
 
 # ── OpenAI system prompt ──────────────────────────────────────────────────────
 _SYSTEM_PROMPT = """You are LeadBot, an expert B2B lead generation strategist and analyst.
@@ -290,7 +297,27 @@ async def scrape(body: ScrapeRequest):
             visited = await db.get_visited_urls()
             existing_keys = await db.get_dedupe_keys()
             run_id = await db.start_run(session_id, keywords)
-            search_offsets = {keyword: await db.get_search_progress(keyword) for keyword in keywords}
+            search_offsets: dict[str, int] = {}
+            resolved_progress: dict[str, dict] = {}
+            for keyword in keywords:
+                normalized_keyword = " ".join(keyword.lower().split())
+                if body.semantic_resume:
+                    resolved = await db.resolve_search_progress(
+                        normalized_keyword,
+                        similarity_threshold=body.similarity_threshold,
+                    )
+                    search_offsets[keyword] = int(resolved.get("next_page", 0))
+                    resolved_progress[keyword] = resolved
+                else:
+                    next_page = await db.get_search_progress(normalized_keyword)
+                    search_offsets[keyword] = next_page
+                    resolved_progress[keyword] = {
+                        "query_text": normalized_keyword,
+                        "matched_query": normalized_keyword,
+                        "next_page": next_page,
+                        "match_type": "exact" if next_page > 0 else "none",
+                        "similarity": 1.0 if next_page > 0 else 0.0,
+                    }
         except Exception as exc:
             yield f"data: {json.dumps({'type':'error','content':f'DB init failed: {exc}'})}\n\n"
             return
@@ -303,9 +330,38 @@ async def scrape(body: ScrapeRequest):
             await db.update_run_progress(rid, pages, new)
 
         async def on_search_progress(keyword: str, next_page: int):
-            await db.set_search_progress(keyword, next_page)
+            normalized_keyword = " ".join(keyword.lower().split())
+            await db.set_search_progress(normalized_keyword, next_page)
+            await db.set_semantic_search_progress(normalized_keyword, next_page, run_id)
 
         kw_str = ", ".join(keywords)
+        for keyword in keywords:
+            resolved = resolved_progress.get(keyword)
+            if not resolved:
+                continue
+            next_page = int(resolved.get("next_page", 0))
+            if next_page <= 0:
+                continue
+            if resolved.get("match_type") == "semantic":
+                matched_query = resolved.get("matched_query", keyword)
+                similarity = float(resolved.get("similarity", 0.0))
+                payload = {
+                    "type": "progress",
+                    "msg": (
+                        f"Semantic resume matched '{keyword}' to '{matched_query}' "
+                        f"(similarity {similarity:.2f}); continuing from results page {next_page + 1}"
+                    ),
+                    "phase": "resume",
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+            else:
+                payload = {
+                    "type": "progress",
+                    "msg": f"Resuming '{keyword}' from results page {next_page + 1}",
+                    "phase": "resume",
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+
         await db.add_turn(session_id, "user", f"/scrape {kw_str}", "scrape")
 
         scrape_lines = []
@@ -439,6 +495,31 @@ async def get_stats():
         return await db.get_stats()
     except Exception as exc:
         raise HTTPException(500, detail=str(exc))
+
+
+@app.get("/api/search-history")
+async def get_search_history(
+    query: str = Query("", description="Keyword text for semantic lookup"),
+    limit: int = Query(5, ge=1, le=20),
+    similarity_threshold: float = Query(0.32, ge=0.0, le=1.0),
+):
+    if not query.strip():
+        return {"query": query, "matches": []}
+    matches = await db.semantic_search_progress(
+        query,
+        limit=limit,
+        similarity_threshold=similarity_threshold,
+    )
+    return {"query": query, "matches": json.loads(json.dumps(matches, default=_json_serial))}
+
+
+@app.post("/api/search-history/resolve")
+async def resolve_search_history(body: SearchHistoryResolveRequest):
+    resolved = await db.resolve_search_progress(
+        body.query,
+        similarity_threshold=body.similarity_threshold,
+    )
+    return json.loads(json.dumps(resolved, default=_json_serial))
 
 
 # ── SPA ───────────────────────────────────────────────────────────────────────

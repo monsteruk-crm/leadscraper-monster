@@ -16,3 +16,5 @@ B2B lead scraping SaaS deployed on Vercel with a Python/FastAPI API, a new React
 - [002 — PostgreSQL + asyncpg persistence](adr/002-postgres-asyncpg.md)
 - [003 — Lead data quality fields](adr/003-lead-data-quality-fields.md)
 - [004 — asyncpg connection pool reliability](adr/004-connection-pool-reliability.md)
+
+- [005 — Semantic scrape-history resume](adr/005-semantic-scrape-history-resume.md)
