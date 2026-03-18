@@ -1,13 +1,13 @@
 # LeadScraper Monster — Documentation
 
-B2B lead scraping SaaS deployed on Vercel (Python/FastAPI) with a PostgreSQL backend and an OpenAI-powered enrichment pipeline.
+B2B lead scraping SaaS deployed on Vercel with a Python/FastAPI API, a new React frontend scaffold, a PostgreSQL backend, and an OpenAI-powered enrichment pipeline.
 
 ## Contents
 
 - [Architecture](architecture.md) — pipeline, modules, lead schema, database tables, SSE events
 - [Configuration](configuration.md) — environment variables and runtime settings
 - [Usage](usage.md) — local development, deployment, API reference, slash commands
-- [Dashboard](dashboard.md) — UI guide: header, sidebar, chat, leads drawer, modals
+- [Dashboard](dashboard.md) — React scaffold status, UI guide, and migration notes
 
 ## Architecture Decision Records
 

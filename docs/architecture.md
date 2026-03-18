@@ -2,30 +2,40 @@
 
 ## Overview
 
-LeadScraper Monster is a serverless FastAPI application. A single Python entry-point (`main.py`) handles both the SPA shell and all REST/SSE API routes. The scraping pipeline runs in the same process, streaming results back to the browser via Server-Sent Events (SSE).
+LeadScraper Monster is being split into two surfaces:
+
+- `frontend/` contains the new React dashboard scaffold
+- `main.py` exposes the Python API and still serves the legacy dashboard during the transition
+
+The scraping pipeline runs in the Python process, streaming results back to the browser via Server-Sent Events (SSE).
 
 ```
-Browser (SPA)
-  │  POST /api/scrape          POST /api/chat
-  │  (SSE stream)              (SSE stream)
-  ▼
-main.py  ── FastAPI / ASGI ──────────────────────────────────
-  │
-  ├── scraper/scraper.py       LeadScraper orchestrator
-  │     ├── scraper/sources.py   DuckDuckGo search
-  │     ├── scraper/parsers.py   HTML parsing, contact extraction
-  │     ├── scraper/enricher.py  OpenAI enrichment
-  │     └── scraper/models.py    Lead + ScrapeResult dataclasses
-  │
-  ├── db/postgres.py           asyncpg persistence layer
-  └── config/config.py         Runtime config (env vars + DB settings)
+Browser (React SPA)         Browser (legacy Python UI)
+  │  GET /frontend/          │  GET /
+  │  GET /api/health         │  POST /api/scrape
+  ▼                          ▼
+frontend/                   main.py  ── FastAPI / ASGI ─────────
+  │                         │
+  └── React/Vite shell      ├── scraper/scraper.py       LeadScraper orchestrator
+                            │     ├── scraper/sources.py   DuckDuckGo search
+                            │     ├── scraper/parsers.py   HTML parsing, contact extraction
+                            │     ├── scraper/enricher.py  OpenAI enrichment
+                            │     └── scraper/models.py    Lead + ScrapeResult dataclasses
+                            │
+                            ├── db/postgres.py           asyncpg persistence layer
+                            └── config/config.py         Runtime config (env vars + DB settings)
 ```
 
 ## Modules
 
+### `frontend/`
+- React/Vite app that renders the dashboard skeleton
+- Calls `GET /api/health` as its first backend integration point
+- Uses `/frontend/` as its Vercel route prefix
+
 ### `main.py`
 - FastAPI app instance with CORS middleware
-- Inline SPA HTML (dark-theme chat UI) served at `GET /`
+- Legacy inline SPA HTML (dark-theme chat UI) still served at `GET /`
 - All REST endpoints under `/api/`
 - SSE streaming for `/api/chat` and `/api/scrape`
 - OpenAI chat assistant (LeadBot) with per-session history

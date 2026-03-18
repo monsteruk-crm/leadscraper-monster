@@ -26,8 +26,17 @@ npm install -g vercel
 #    OPENAI_MODEL=gpt-4o-mini   # optional
 
 # 5. Run locally — mirrors the production serverless environment
-vercel dev
-# App available at http://localhost:3000
+vercel dev -L
+# Python API available at http://localhost:3000
+# React dashboard available at http://localhost:3000/frontend/
+```
+
+If you want to work on the React app directly, use the Vite dev server:
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
 ### First-time DB initialisation
@@ -65,6 +74,8 @@ After deploying, set `DATABASE_URL` and `OPENAI_API_KEY` in the Vercel project s
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/health` | Returns DB connection status and stats |
+
+The new React dashboard uses this endpoint as its first live API check.
 
 ### Database
 | Method | Path | Description |

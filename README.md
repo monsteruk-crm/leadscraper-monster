@@ -2,7 +2,10 @@
 
 # FastAPI + Vercel
 
-This example shows how to use FastAPI on Vercel with Serverless Functions using the [Python Runtime](https://vercel.com/docs/concepts/functions/serverless-functions/runtimes/python).
+This repository now splits the UI and API:
+
+- `frontend/` contains the React dashboard scaffold
+- `main.py` contains the FastAPI API and the legacy dashboard during the transition
 
 ## Demo
 
@@ -16,10 +19,10 @@ This example uses the Asynchronous Server Gateway Interface (ASGI) with FastAPI 
 
 ```bash
 npm i -g vercel
-vercel dev
+vercel dev -L
 ```
 
-Your FastAPI application is now available at `http://localhost:3000`.
+The API is available at `http://localhost:3000`, and the React dashboard is at `http://localhost:3000/frontend/`.
 
 ## One-Click Deploy
 

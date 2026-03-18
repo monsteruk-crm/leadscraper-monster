@@ -1,6 +1,18 @@
 # Dashboard
 
-The UI is a dark-theme single-page app served at `/`. All JavaScript runs in the browser; no frontend framework is used.
+The transition UI now lives in `frontend/` as a React/Vite scaffold served at `/frontend/`.
+The legacy Python dashboard still exists at `/` while the migration is in progress.
+
+The React screen is intentionally minimal for now: it only fetches `GET /api/health` and shows a dashboard skeleton around that result.
+
+## React Skeleton
+
+The new dashboard is a mock layout, not the full product yet.
+
+- `LeadScraper Monster` title bar with API connection status
+- Summary cards for leads, sessions, runs, and visited URLs
+- Recent leads table populated with placeholder rows
+- Work queue panel reserved for upcoming modules
 
 ## Header
 
@@ -13,6 +25,16 @@ The UI is a dark-theme single-page app served at `/`. All JavaScript runs in the
 | **Settings** | Opens the Settings modal |
 | **Init DB** | Creates tables (safe to repeat) |
 | **Reset DB** | Drops all tables and recreates schema — **destructive** |
+
+## API Check
+
+The React scaffold calls `GET /api/health` and renders:
+
+- `status`
+- `db`
+- the current health/error state
+
+This is the only live backend integration in the new frontend for now.
 
 ## Sidebar
 
