@@ -37,3 +37,14 @@ DB settings are loaded at the start of every scrape run via `db.apply_settings_t
 2. Add a `os.environ.get(...)` line in `config/config.py`.
 3. Update this file (`docs/configuration.md`).
 4. If it changes architecture significantly, write an ADR in `docs/adr/`.
+
+
+## Per-request Scrape Controls
+
+`POST /api/scrape` accepts optional request-level controls (not persisted in `settings`):
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `semantic_resume` | bool | `true` | When enabled, query depth resume can use semantic history matches instead of exact keyword-only matches |
+| `similarity_threshold` | float | `0.32` | Similarity floor used by pg_trgm when resolving semantic search-history matches |
+

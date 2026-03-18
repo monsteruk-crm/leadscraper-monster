@@ -163,6 +163,20 @@ CREATE TABLE IF NOT EXISTS search_progress (
 );
 CREATE INDEX IF NOT EXISTS idx_search_progress_updated ON search_progress(updated_at);
 
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE TABLE IF NOT EXISTS semantic_search_history (
+    id               SERIAL PRIMARY KEY,
+    query_text       TEXT NOT NULL UNIQUE,
+    next_page        INTEGER NOT NULL DEFAULT 0,
+    matched_runs     INTEGER NOT NULL DEFAULT 0,
+    last_run_id      INTEGER,
+    updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_semantic_history_query_trgm
+    ON semantic_search_history USING gin (query_text gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_semantic_history_updated ON semantic_search_history(updated_at);
+
 CREATE TABLE IF NOT EXISTS settings (
     id                      INTEGER PRIMARY KEY DEFAULT 1,
     keywords                JSONB   NOT NULL DEFAULT '["sustainable packaging suppliers UK"]',
@@ -194,7 +208,7 @@ INSERT INTO settings (
 
 
 _DROP_DDL = """
-DROP TABLE IF EXISTS chat_turns, leads, visited_urls, search_runs, search_progress, settings, sessions CASCADE;
+DROP TABLE IF EXISTS chat_turns, leads, visited_urls, search_runs, search_progress, semantic_search_history, settings, sessions CASCADE;
 """
 
 # After a full reset we always restore settings to a clean seed (UPSERT).
@@ -665,6 +679,103 @@ async def set_search_progress(keyword: str, next_page: int) -> None:
             max(0, int(next_page)),
         )
 
+
+
+
+async def set_semantic_search_progress(
+    query_text: str,
+    next_page: int,
+    run_id: Optional[int] = None,
+) -> None:
+    normalized = " ".join(query_text.lower().split())
+    if not normalized:
+        return
+
+    async with get_conn() as conn:
+        await conn.execute(
+            """
+            INSERT INTO semantic_search_history (query_text, next_page, matched_runs, last_run_id, updated_at)
+            VALUES ($1, $2, 1, $3, NOW())
+            ON CONFLICT (query_text) DO UPDATE SET
+                next_page = EXCLUDED.next_page,
+                matched_runs = semantic_search_history.matched_runs + 1,
+                last_run_id = COALESCE(EXCLUDED.last_run_id, semantic_search_history.last_run_id),
+                updated_at = NOW()
+            """,
+            normalized,
+            max(0, int(next_page)),
+            run_id,
+        )
+
+
+async def semantic_search_progress(
+    query_text: str,
+    limit: int = 5,
+    similarity_threshold: float = 0.32,
+) -> list[dict[str, Any]]:
+    normalized = " ".join(query_text.lower().split())
+    if not normalized:
+        return []
+
+    async with get_conn() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                query_text,
+                next_page,
+                matched_runs,
+                last_run_id,
+                updated_at,
+                similarity(query_text, $1) AS similarity
+            FROM semantic_search_history
+            WHERE query_text % $1 OR similarity(query_text, $1) >= $2
+            ORDER BY similarity DESC, updated_at DESC
+            LIMIT $3
+            """,
+            normalized,
+            similarity_threshold,
+            limit,
+        )
+        return [dict(r) for r in rows]
+
+
+async def resolve_search_progress(
+    query_text: str,
+    similarity_threshold: float = 0.32,
+) -> dict[str, Any]:
+    normalized = " ".join(query_text.lower().split())
+    exact_next_page = await get_search_progress(normalized)
+    if exact_next_page > 0:
+        return {
+            "query_text": normalized,
+            "matched_query": normalized,
+            "next_page": exact_next_page,
+            "match_type": "exact",
+            "similarity": 1.0,
+        }
+
+    matches = await semantic_search_progress(
+        normalized,
+        limit=1,
+        similarity_threshold=similarity_threshold,
+    )
+    if not matches:
+        return {
+            "query_text": normalized,
+            "matched_query": normalized,
+            "next_page": 0,
+            "match_type": "none",
+            "similarity": 0.0,
+        }
+
+    top = matches[0]
+    return {
+        "query_text": normalized,
+        "matched_query": top["query_text"],
+        "next_page": int(top["next_page"] or 0),
+        "match_type": "semantic",
+        "similarity": float(top.get("similarity") or 0.0),
+    }
 
 async def list_runs(limit: int = 50) -> list[dict]:
     async with get_conn() as conn:

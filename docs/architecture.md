@@ -126,7 +126,8 @@ Async PostgreSQL layer via `asyncpg`. Uses a module-level connection pool (re-us
 | `leads` | Scraped leads, unique on `dedupe_key` |
 | `visited_urls` | Every URL ever fetched (prevents re-scraping) |
 | `search_runs` | Log of every scrape run with stats |
-| `search_progress` | Per-keyword DuckDuckGo result-page cursor for resumed searches |
+| `search_progress` | Per-keyword exact DuckDuckGo result-page cursor for resumed searches |
+| `semantic_search_history` | Canonicalized query history with trigram index for semantic resume |
 | `settings` | Single-row config (id=1, singleton constraint) |
 
 Key functions: `init_db()`, `reset_db()`, `_close_pool()`, `insert_lead()`, `get_leads()`, `export_leads_csv()`, `get_stats()`.
@@ -150,7 +151,9 @@ search_duckduckgo(keyword)
                         → on_lead callback → db.insert_lead()
                             → yield LeadEvent("lead", {...})  [SSE]
 
-The scraper stores the next DuckDuckGo result page per keyword in `search_progress`, so rerunning the same search continues deeper through results instead of starting at page 1 every time.
+The scraper stores the next DuckDuckGo result page per keyword in `search_progress`, and also updates `semantic_search_history` (pg_trgm similarity).
+
+When a new scrape keyword arrives, the API first tries exact progress lookup and then semantic lookup (default threshold `0.32`). This lets near-duplicate queries like `uk dental clinics` and `dental clinics uk` continue from previous depth instead of restarting at page 1.
 ```
 
 ## SSE Event Types
