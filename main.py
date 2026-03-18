@@ -63,6 +63,16 @@ class ConfigUpdate(BaseModel):
     ai_enrichment_enabled: bool = True
     ai_confidence_threshold: float = 0.0
 
+
+class LeadUpdate(BaseModel):
+    contact_name: Optional[str] = None
+    role: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    owner: Optional[str] = None
+    last_touch: Optional[str] = None
+    opt_out: Optional[bool] = None
+
 # ── OpenAI system prompt ──────────────────────────────────────────────────────
 _SYSTEM_PROMPT = """You are LeadBot, an expert B2B lead generation strategist and analyst.
 
@@ -371,6 +381,19 @@ async def export_leads():
 async def toggle_archive(lead_id: int, archived: bool = Query(True)):
     await db.archive_lead(lead_id, archived)
     return {"status": "ok"}
+
+
+@app.patch("/api/leads/{lead_id}")
+async def update_lead(lead_id: int, body: LeadUpdate):
+    updates = {
+        key: value
+        for key, value in body.model_dump(exclude_unset=True).items()
+        if value is not None
+    }
+    if not updates:
+        return {"status": "ok", "updated": []}
+    await db.update_lead(lead_id, updates)
+    return {"status": "ok", "updated": sorted(updates.keys())}
 
 
 # ── Runs / Stats ──────────────────────────────────────────────────────────────

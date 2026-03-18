@@ -11,7 +11,7 @@ The scraping pipeline runs in the Python process, streaming results back to the 
 
 ```
 Browser (React SPA)         Browser (legacy Python UI)
-  │  GET /frontend/          │  GET /
+  │  GET /dashboard/         │  GET /
   │  GET /api/health         │  POST /api/scrape
   ▼                          ▼
 frontend/                   main.py  ── FastAPI / ASGI ─────────
@@ -29,9 +29,11 @@ frontend/                   main.py  ── FastAPI / ASGI ───────
 ## Modules
 
 ### `frontend/`
-- React/Vite app that renders the dashboard skeleton
-- Calls `GET /api/health` as its first backend integration point
-- Uses `/frontend/` as its Vercel route prefix
+- React/Vite app that renders the transition dashboard
+- MUI provides the shell, cards, tables, drawers, and dialogs
+- `react-terminal` provides the embedded operator terminal
+- Calls the existing FastAPI REST and SSE endpoints directly for health, stats, config, sessions, leads, chat, and scrape workflows
+- Uses `/dashboard/` as its Vercel route prefix
 
 ### `main.py`
 - FastAPI app instance with CORS middleware
@@ -44,7 +46,7 @@ frontend/                   main.py  ── FastAPI / ASGI ───────
 ### `scraper/models.py`
 Dataclasses shared across all scraper modules.
 
-**`Lead`** fields (matches Monster CRM schema):
+**`Lead`** fields (scraper working model):
 
 | Field | Type | Notes |
 |---|---|---|
@@ -52,16 +54,16 @@ Dataclasses shared across all scraper modules.
 | `website` | str | |
 | `country` | str | |
 | `city` | str | |
-| `first_name` | str | extracted by parser + AI |
-| `last_name` | str | extracted by parser + AI |
-| `contact_name` | str | `first_name + last_name`; kept for CSV compat |
-| `title` | str | job title / role |
-| `role` | str | legacy alias for `title` |
+| `first_name` | str | extracted by parser + AI; not persisted as a standalone DB column |
+| `last_name` | str | extracted by parser + AI; not persisted as a standalone DB column |
+| `contact_name` | str | persisted/exported canonical contact column |
+| `title` | str | scraper/enricher working field collapsed into `role` at persistence time |
+| `role` | str | persisted/exported canonical role column |
 | `email` | str | |
 | `phone` | str | |
 | `source_url` | str | page the lead was found on |
 | `category` | str | industry category |
-| `size_signals` | str | textual clues about company size |
+| `size_signals` | str | textual clues about company size; exported as `size/signals` |
 | `notes` | str | AI-generated notes |
 | `confidence` | float | 0.0–1.0; AI-assigned quality score |
 | `status` | str | New / Contacted / Qualified / etc. |
@@ -70,6 +72,14 @@ Dataclasses shared across all scraper modules.
 | `opt_out` | bool | GDPR opt-out flag |
 
 `dedupe_key` — computed property: `email or website or company_name` (lowercased). Used to detect duplicates before inserting.
+
+### Lead sheet alignment
+
+`docs/lead_sheet_schema.csv` is the canonical external sheet shape.
+
+- The DB/export path now aligns to `company_name, website, country, city, contact_name, role, email, source_url, category, size/signals, notes, confidence, status, owner, last_touch, opt_out`
+- Internal operational columns still exist where needed (`id`, `phone`, `dedupe_key`, `created_at`, `session_id`, `archived`)
+- The app intentionally avoids a migration path here; schema changes are expected to be applied with a destructive reset via `/api/db/reset`
 
 **`ScrapeResult`** — aggregates counts for one run: `leads_new`, `leads_duplicate`, `leads_discarded`, `pages_visited`.
 
@@ -81,9 +91,10 @@ Controlled by `cfg.MAX_PAGES` and `cfg.REQUEST_DELAY_SECONDS`.
 Parses raw HTML into a `Lead`:
 1. Scans `<a href="mailto:">` and `<a href="tel:">` links **before** noise removal.
 2. Extracts `city` and `country` from schema.org JSON-LD (`addressLocality`/`addressCountry`), microdata (`itemprop`), and `geo.placename` meta tags.
-3. Extracts company name from `<title>`, `<meta og:site_name>`, and schema.org JSON-LD.
-4. Tries to split `contact_name` into `first_name` / `last_name` via schema.org `Person` markup.
-5. Falls back to regex patterns for email / phone in body text.
+3. Normalizes common country aliases (`GB`, `UK`, `US`, etc.) and splits combined place strings when a page exposes city/country in one meta field.
+4. Extracts company name from `<title>`, `<meta og:site_name>`, and schema.org JSON-LD.
+5. Tries to split `contact_name` into `first_name` / `last_name` via schema.org `Person` markup.
+6. Falls back to regex patterns for email / phone in body text.
 
 ### `scraper/enricher.py`
 Calls OpenAI (`gpt-4o-mini` by default) with page text and the partially-filled `Lead`.

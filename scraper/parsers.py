@@ -31,6 +31,20 @@ _PERSON_NAME_RE = re.compile(r"\b([A-Z][a-z]+ [A-Z][a-z]+)\b")
 _NOREPLY_PREFIXES = ("noreply", "no-reply", "donotreply", "mailer", "info@",
                      "hello@", "contact@", "support@", "admin@", "enquiries@")
 
+_COUNTRY_ALIASES = {
+    "uk": "United Kingdom",
+    "gb": "United Kingdom",
+    "gbr": "United Kingdom",
+    "england": "United Kingdom",
+    "scotland": "United Kingdom",
+    "wales": "United Kingdom",
+    "northern ireland": "United Kingdom",
+    "us": "United States",
+    "usa": "United States",
+    "united states of america": "United States",
+    "uae": "United Arab Emirates",
+}
+
 
 def parse_lead_info(html: str, source_url: str) -> Optional[Lead]:
     """Extract a Lead from a raw HTML page.
@@ -137,10 +151,11 @@ def _extract_location_from_html(soup: BeautifulSoup) -> tuple[str, str]:
                 addr = node.get("address") or {}
                 if isinstance(addr, str):
                     continue
-                city = addr.get("addressLocality", "")
+                city = _clean_location_value(addr.get("addressLocality", ""))
                 raw_country = addr.get("addressCountry", "")
-                # addressCountry may be an ISO code or a full name
-                country = raw_country if isinstance(raw_country, str) else ""
+                if isinstance(raw_country, dict):
+                    raw_country = raw_country.get("name", "")
+                country = _normalize_country(raw_country)
                 if city or country:
                     return city.strip(), country.strip()
         except Exception:
@@ -149,23 +164,67 @@ def _extract_location_from_html(soup: BeautifulSoup) -> tuple[str, str]:
     # 2. Microdata — itemprop="addressLocality" / "addressCountry"
     city_el = soup.find(attrs={"itemprop": "addressLocality"})
     country_el = soup.find(attrs={"itemprop": "addressCountry"})
-    city = (city_el.get_text(strip=True) if city_el else "")
-    country = (country_el.get_text(strip=True) if country_el else "")
+    city = _clean_location_value(city_el.get_text(strip=True) if city_el else "")
+    country = _normalize_country(country_el.get_text(strip=True) if country_el else "")
     if city or country:
         return city, country
 
     # 3. Meta tags
-    for name, attr in (("geo.placename", "city"), ("geo.region", "country")):
+    city = ""
+    country = ""
+    for name in ("geo.placename", "geo.position", "geo.region", "geo.country"):
         tag = soup.find("meta", attrs={"name": name})
         if tag and tag.get("content"):
-            if attr == "city":
-                city = tag["content"].strip()
-            else:
-                country = tag["content"].strip()
+            raw = tag["content"].strip()
+            if name == "geo.placename":
+                parsed_city, parsed_country = _split_place_name(raw)
+                city = city or parsed_city
+                country = country or parsed_country
+            elif name == "geo.country":
+                country = country or _normalize_country(raw)
+            elif name == "geo.region":
+                # geo.region is often a country code or country-like region string.
+                normalized = _normalize_country(raw)
+                if normalized and normalized != raw:
+                    country = country or normalized
     if city or country:
         return city, country
 
     return "", ""
+
+
+def _clean_location_value(value: object) -> str:
+    return str(value).strip() if value else ""
+
+
+def _normalize_country(value: object) -> str:
+    raw = _clean_location_value(value)
+    if not raw:
+        return ""
+    alias = _COUNTRY_ALIASES.get(raw.lower())
+    if alias:
+        return alias
+    if raw.isupper() and len(raw) <= 3:
+        return _COUNTRY_ALIASES.get(raw.lower(), raw)
+    return raw
+
+
+def _split_place_name(value: str) -> tuple[str, str]:
+    raw = _clean_location_value(value)
+    if not raw:
+        return "", ""
+
+    parts = [part.strip() for part in re.split(r"[|,;/]", raw) if part.strip()]
+    if len(parts) >= 2:
+        city = parts[0]
+        country = _normalize_country(parts[-1])
+        if city != country:
+            return city, country
+
+    normalized = _normalize_country(raw)
+    if normalized != raw:
+        return "", normalized
+    return raw, ""
 
 
 def _extract_name_from_schema(soup: BeautifulSoup) -> tuple[str, str]:

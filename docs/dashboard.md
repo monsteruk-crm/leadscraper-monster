@@ -1,94 +1,127 @@
 # Dashboard
 
-The transition UI now lives in `frontend/` as a React/Vite scaffold served at `/frontend/`.
+The transition UI now lives in `frontend/` as a React/Vite app served at `/dashboard/`.
 The legacy Python dashboard still exists at `/` while the migration is in progress.
 
-The React screen is intentionally minimal for now: it only fetches `GET /api/health` and shows a dashboard skeleton around that result.
+The new shell is MUI-based and intentionally feature-shaped:
 
-## React Skeleton
+- fixed top bar with API health status
+- permanent navigation rail on desktop
+- tighter summary cards and a wider terminal pane
+- terminal text reduced for denser operator output
+- hero metric cards now use a label/value row with circular, metric-colored counters
+- hero metric labels are larger and bolder
+- pipeline overview tiles reuse the same metric card treatment in a compact size
+- runtime stats are now shown as compact KPI cards with label/value on the same row
+- leads table with search and detail drawer
+- editable lead status from the table and detail drawer
+- editable lead notes in the detail drawer
+- separate city and country fields in the lead detail drawer
+- lead pagination
+- session drawer and settings dialog
+- embedded `react-terminal` chat panel
+- DB init/reset and export actions exposed in the React UI
 
-The new dashboard is a mock layout, not the full product yet.
+The React screen is now wired to the Python backend instead of mocked local data.
 
-- `LeadScraper Monster` title bar with API connection status
-- Summary cards for leads, sessions, runs, and visited URLs
-- Recent leads table populated with placeholder rows
-- Work queue panel reserved for upcoming modules
+## React Shell
 
-## Header
+### Top bar
 
 | Element | Action |
 |---|---|
-| **LeadBot** logo | — |
-| Session badge (e.g. `#3 Session 2026-03-17`) | Click to open the Sessions modal |
-| **Leads N** button | Opens the Leads drawer |
-| **Export CSV** | Downloads all leads as `leads.csv` |
-| **Settings** | Opens the Settings modal |
-| **Init DB** | Creates tables (safe to repeat) |
-| **Reset DB** | Drops all tables and recreates schema — **destructive** |
+| Brand + status chip | Shows live API health |
+| **Refresh** | Reloads health, stats, config, sessions, runs, and leads |
+| **Sessions** | Opens the session drawer |
+| **Settings** | Opens the settings dialog |
 
-## API Check
+### Navigation rail
 
-The React scaffold calls `GET /api/health` and renders:
+- Overview
+- Leads
+- Terminal
+- Settings
 
-- `status`
-- `db`
-- the current health/error state
+The left navigation now syncs the active tab and scrolls the main content section into view.
 
-This is the only live backend integration in the new frontend for now.
+### Overview tab
 
-## Sidebar
+- Summary cards for leads, sessions, runs, and URLs from `GET /api/stats`
+- Pipeline stage cards derived from `GET /api/config`, `GET /api/runs`, and the loaded lead set
+- Recent session cards from `GET /api/sessions`
+- Current session history preview from `GET /api/sessions/{id}/history`
 
-- **Stats** panel: live counts for Leads, URLs visited, Sessions, Runs.
-- **Sessions** list: click any session to load its history.
-- **+ New** / **Refresh** buttons at the bottom.
+### Leads tab
 
-## Chat Area
+- Search box queries `GET /api/leads`
+- Pagination uses the `page`/`page_size` response from `GET /api/leads`
+- Archive toggle calls `PATCH /api/leads/{id}/archive`
+- Status select calls `PATCH /api/leads/{id}`
+- Export button opens `GET /api/leads/export`
+- Table shows company, contact, role, email, country, category, confidence, and status
+- Clicking a row opens a lead detail drawer
 
-The main panel. Messages are colour-coded:
-- **User** (right, blue bubble) — your messages or commands
-- **Assistant** (left, dark bubble) — LeadBot responses, streamed token by token
-- **Scrape** (mono font, dark) — scrape progress and lead cards
+### Terminal tab
 
-Lead cards appear inline during a scrape, showing company name, confidence badge (green ≥ 0.7, yellow ≥ 0.4, red < 0.4), email, country, and category.
+The terminal is embedded in the dashboard using `react-terminal`.
 
-After a successful scrape, the Leads drawer opens automatically.
+- Plain text is sent to `POST /api/chat`
+- Explicit commands remain available for operator workflows
 
-## Leads Drawer
+It includes commands for:
 
-Opens from the bottom, occupying 70% of the viewport height.
+- `help`
+- `health`
+- `stats`
+- `sessions`
+- `new [name]`
+- `load <session_id>`
+- `name <new name>`
+- `history [limit]`
+- `config`
+- `leads`
+- `chat <message>`
+- `scrape [kw1, kw2]`
 
-**Search box** — filters by company name, email, category, or country (300 ms debounce).
+### Settings tab
 
-**Columns:**
+Settings now reads and writes the live config via:
 
-| Column | Source |
-|---|---|
-| Company | `company_name` |
-| First | `first_name` |
-| Last | `last_name` |
-| Title | `title` (job title) |
-| Email | `email` |
-| Phone | `phone` |
-| Category | `category` |
-| Country | `country` |
-| Conf | `confidence` (0.00–1.00, colour-coded badge) |
-| Status | `status` |
-| — | Archive / Restore button |
+- `GET /api/config`
+- `POST /api/config`
+- `POST /api/db/init`
+- `POST /api/db/reset`
+- `GET /api/leads/export`
 
-**Footer:** total lead count, pagination (up to 10 pages shown), Export CSV button.
+### Session and lead drawers
 
-## Modals
+- Session drawer lists live sessions, creates new sessions, renames the active session, and previews history
+- Lead drawer shows the selected lead in more detail, can edit status and notes, and can archive or restore it
 
-### Settings
-Configure scraping behaviour. Changes are saved to the DB via `POST /api/config` and take effect on the next scrape.
+## TODO
 
-Fields: default keywords (one per line), max pages per keyword, target new leads, request delay, AI confidence threshold, enable AI enrichment toggle.
+- Port the remaining legacy Python-only flows so `/dashboard/` can replace `/`
+- Add richer run history and session history browsing beyond the current summary panels
+- Add more lead-sheet field editing once the API contract is stable for those fields
 
-### Init DB
-Calls `POST /api/db/init`. Safe to run at any time — only creates tables that don't exist yet.
+## Live data boundary
 
-### Reset DB
-Calls `POST /api/db/reset`. Drops **all** tables (leads, sessions, chat turns, runs, visited URLs, settings) and recreates them. Use this when the schema has changed (e.g. new columns were added). All data is permanently deleted.
+The React shell now uses the existing FastAPI contract directly:
 
-### Sessions
-Lists all sessions with turn counts and last-updated date. Click a session to switch to it. Create a new session with an optional name.
+- `GET /api/health`
+- `GET /api/stats`
+- `GET /api/config`
+- `POST /api/config`
+- `GET /api/sessions`
+- `POST /api/sessions`
+- `PATCH /api/sessions/{id}/rename`
+- `GET /api/sessions/{id}/history`
+- `GET /api/leads`
+- `PATCH /api/leads/{id}`
+- `GET /api/leads/export`
+- `PATCH /api/leads/{id}/archive`
+- `GET /api/runs`
+- `POST /api/chat`
+- `POST /api/scrape`
+
+The legacy Python UI still remains available at `/` while the React dashboard continues to absorb more of the product surface.

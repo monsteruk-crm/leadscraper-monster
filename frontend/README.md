@@ -11,6 +11,6 @@ npm run dev
 
 ## Notes
 
-- The app is mounted under `/frontend/` when run through `vercel dev -L`
+- The app is mounted under `/dashboard/` when run through `vercel dev -L`
 - It currently calls only `GET /api/health`
 - The rest of the dashboard will be ported here incrementally

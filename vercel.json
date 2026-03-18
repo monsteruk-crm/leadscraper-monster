@@ -2,7 +2,7 @@
   "experimentalServices": {
     "frontend": {
       "entrypoint": "frontend",
-      "routePrefix": "/frontend"
+      "routePrefix": "/dashboard"
     },
     "web": {
       "entrypoint": "main.py",

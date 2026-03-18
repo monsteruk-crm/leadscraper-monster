@@ -28,7 +28,7 @@ npm install -g vercel
 # 5. Run locally — mirrors the production serverless environment
 vercel dev -L
 # Python API available at http://localhost:3000
-# React dashboard available at http://localhost:3000/frontend/
+# React dashboard available at http://localhost:3000/dashboard/
 ```
 
 If you want to work on the React app directly, use the Vite dev server:
@@ -41,7 +41,7 @@ npm run dev
 
 ### First-time DB initialisation
 
-After starting for the first time, click **Init DB** in the header, or:
+After starting for the first time, use **Init DB** from the React dashboard settings surfaces, or:
 
 ```bash
 curl -X POST http://localhost:3000/api/db/init
@@ -51,13 +51,15 @@ This creates all tables. It is safe to run multiple times (idempotent).
 
 ### Reset DB (wipe all data)
 
-If the schema has changed (new columns, etc.), click **Reset DB** in the header, or:
+If the schema has changed (new columns, etc.), use **Reset DB** from the React dashboard settings surfaces, or:
 
 ```bash
 curl -X POST http://localhost:3000/api/db/reset
 ```
 
 **Warning:** this drops all tables and all data.
+
+This project currently treats schema alignment as destructive-reset only. Update the DDL, then wipe and re-seed with `/api/db/reset` instead of attempting an in-place migration.
 
 ## Deployment to Vercel
 
@@ -66,7 +68,7 @@ curl -X POST http://localhost:3000/api/db/reset
 vercel --prod
 ```
 
-After deploying, set `DATABASE_URL` and `OPENAI_API_KEY` in the Vercel project settings, then visit the deployed URL and click **Init DB**.
+After deploying, set `DATABASE_URL` and `OPENAI_API_KEY` in the Vercel project settings, then visit the deployed URL and run **Init DB** from the React dashboard.
 
 ## API Reference
 
@@ -111,6 +113,7 @@ The new React dashboard uses this endpoint as its first live API check.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/leads` | List leads (paginated, searchable) |
+| `PATCH` | `/api/leads/{id}` | Update editable lead fields such as status and notes |
 | `GET` | `/api/leads/export` | Download all leads as CSV |
 | `PATCH` | `/api/leads/{id}/archive` | Archive or restore a lead |
 

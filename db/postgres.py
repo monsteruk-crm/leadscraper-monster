@@ -18,6 +18,7 @@ import csv
 import io
 import json
 import logging
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
@@ -27,6 +28,25 @@ import asyncpg
 import config.config as cfg
 
 logger = logging.getLogger(__name__)
+
+LEAD_SHEET_FIELDNAMES = [
+    "company_name",
+    "website",
+    "country",
+    "city",
+    "contact_name",
+    "role",
+    "email",
+    "source_url",
+    "category",
+    "size/signals",
+    "notes",
+    "confidence",
+    "status",
+    "owner",
+    "last_touch",
+    "opt_out",
+]
 
 # Module-level pool (re-used across warm Vercel invocations).
 _pool: Optional[asyncpg.Pool] = None
@@ -98,10 +118,7 @@ CREATE TABLE IF NOT EXISTS leads (
     website      TEXT    DEFAULT '',
     country      TEXT    DEFAULT '',
     city         TEXT    DEFAULT '',
-    first_name   TEXT    DEFAULT '',
-    last_name    TEXT    DEFAULT '',
     contact_name TEXT    DEFAULT '',
-    title        TEXT    DEFAULT '',
     role         TEXT    DEFAULT '',
     email        TEXT    DEFAULT '',
     phone        TEXT    DEFAULT '',
@@ -380,19 +397,24 @@ async def insert_lead(lead: "Lead", session_id: Optional[int] = None) -> tuple[i
         )
         if existing:
             return existing["id"], False
+        contact_name = (
+            lead.contact_name
+            or " ".join(part for part in [lead.first_name, lead.last_name] if part).strip()
+        )
+        role = lead.role or lead.title
         row = await conn.fetchrow("""
             INSERT INTO leads (
                 company_name, website, country, city,
-                first_name, last_name, contact_name, title, role,
+                contact_name, role,
                 email, phone, source_url, category, size_signals, notes,
                 confidence, status, owner, last_touch, opt_out,
                 dedupe_key, session_id
             ) VALUES (
-                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
             ) RETURNING id
         """,
             lead.company_name, lead.website, lead.country, lead.city,
-            lead.first_name, lead.last_name, lead.contact_name, lead.title, lead.role,
+            contact_name, role,
             lead.email, lead.phone, lead.source_url, lead.category,
             lead.size_signals, lead.notes, lead.confidence, lead.status,
             lead.owner, lead.last_touch, bool(lead.opt_out), key, session_id,
@@ -422,7 +444,12 @@ async def get_leads(
     async with get_conn() as conn:
         base_where = "" if include_archived else "AND archived = false"
         if search:
-            where = f"WHERE (company_name ILIKE $3 OR email ILIKE $3 OR category ILIKE $3 OR country ILIKE $3) {base_where}"
+            where = (
+                "WHERE ("
+                "company_name ILIKE $3 OR contact_name ILIKE $3 OR role ILIKE $3 OR "
+                "email ILIKE $3 OR category ILIKE $3 OR country ILIKE $3 OR status ILIKE $3"
+                f") {base_where}"
+            )
             args = [page_size, offset, f"%{search}%"]
         else:
             where = f"WHERE true {base_where}"
@@ -446,6 +473,35 @@ async def archive_lead(lead_id: int, archived: bool = True) -> None:
         )
 
 
+async def update_lead(lead_id: int, fields: Mapping[str, Any]) -> None:
+    allowed = {
+        "contact_name": "contact_name",
+        "role": "role",
+        "status": "status",
+        "notes": "notes",
+        "owner": "owner",
+        "last_touch": "last_touch",
+        "opt_out": "opt_out",
+    }
+    updates: list[tuple[str, Any]] = []
+    for key, value in fields.items():
+        column = allowed.get(key)
+        if column is not None:
+            updates.append((column, value))
+
+    if not updates:
+        return
+
+    assignments = ", ".join(f"{column} = ${index}" for index, (column, _) in enumerate(updates, start=1))
+    values = [value for _, value in updates]
+    async with get_conn() as conn:
+        await conn.execute(
+            f"UPDATE leads SET {assignments} WHERE id = ${len(values) + 1}",
+            *values,
+            lead_id,
+        )
+
+
 async def get_all_leads_for_export() -> list[dict]:
     async with get_conn() as conn:
         rows = await conn.fetch("SELECT * FROM leads ORDER BY id DESC")
@@ -453,15 +509,16 @@ async def get_all_leads_for_export() -> list[dict]:
 
 
 async def export_leads_csv() -> str:
-    """Return a CSV string of all non-archived leads."""
-    from scraper.models import Lead
-    fieldnames = Lead.fieldnames()
+    """Return a CSV string aligned to the documented lead sheet schema."""
     leads = await get_all_leads_for_export()
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=fieldnames)
+    writer = csv.DictWriter(buf, fieldnames=LEAD_SHEET_FIELDNAMES)
     writer.writeheader()
     for lead in leads:
-        row = {k: lead.get(k, "") for k in fieldnames}
+        row = {k: lead.get(k, "") for k in LEAD_SHEET_FIELDNAMES}
+        row["size/signals"] = lead.get("size_signals", "")
+        row["role"] = lead.get("role", "") or lead.get("title", "")
+        row["contact_name"] = lead.get("contact_name", "")
         row["opt_out"] = bool(row.get("opt_out", False))
         writer.writerow(row)
     return buf.getvalue()

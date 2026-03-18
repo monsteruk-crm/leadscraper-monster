@@ -22,7 +22,7 @@ npm i -g vercel
 vercel dev -L
 ```
 
-The API is available at `http://localhost:3000`, and the React dashboard is at `http://localhost:3000/frontend/`.
+The API is available at `http://localhost:3000`, and the React dashboard is at `http://localhost:3000/dashboard/`.
 
 ## One-Click Deploy
 
