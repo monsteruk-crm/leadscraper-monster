@@ -9,3 +9,4 @@
 | [005](005-semantic-scrape-history-resume.md) | Semantic scrape-history resume | Accepted |
 | [006](006-multi-source-search-connectors.md) | Multi-source search connectors | Accepted |
 | [007](007-bing-search-fallback.md) | Bing search fallback | Accepted |
+| [008](008-react-dashboard-only.md) | React dashboard only | Accepted |

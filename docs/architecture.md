@@ -2,34 +2,30 @@
 
 ## Overview
 
-LeadScraper Monster is being split into two surfaces:
+LeadScraper Monster has two surfaces:
 
-- `frontend/` contains the new React dashboard scaffold
-- `main.py` exposes the Python API and still serves the legacy dashboard during the transition
+- `frontend/` contains the React dashboard
+- `main.py` exposes the Python API and redirects `/` to `/dashboard/`
 
 The scraping pipeline runs in the Python process, streaming results back to the browser via Server-Sent Events (SSE).
 
 ```
-Browser (React SPA)         Browser (legacy Python UI)
-  │  GET /dashboard/         │  GET /
-  │  GET /api/health         │  POST /api/scrape
-  ▼                          ▼
-frontend/                   main.py  ── FastAPI / ASGI ─────────
-  │                         │
-  └── React/Vite shell      ├── scraper/scraper.py       LeadScraper orchestrator
-                            │     ├── scraper/sources.py   Bing, DuckDuckGo, Brave, Nominatim search
-                            │     ├── scraper/parsers.py   HTML parsing, contact extraction
-                            │     ├── scraper/enricher.py  OpenAI enrichment
-                            │     └── scraper/models.py    Lead + ScrapeResult dataclasses
-                            │
-                            ├── db/postgres.py           asyncpg persistence layer
-                            └── config/config.py         Runtime config (env vars + DB settings)
+Browser (React SPA)         main.py  ── FastAPI / ASGI ─────────
+  │  GET /dashboard/         │
+  │  GET /api/health         ├── scraper/scraper.py       LeadScraper orchestrator
+  │  POST /api/scrape        │     ├── scraper/sources.py   Bing, DuckDuckGo, Brave, Nominatim search
+  ▼                          │     ├── scraper/parsers.py   HTML parsing, contact extraction
+frontend/                    │     ├── scraper/enricher.py  OpenAI enrichment
+  └── React/Vite shell       │     └── scraper/models.py    Lead + ScrapeResult dataclasses
+                              │
+                              ├── db/postgres.py           asyncpg persistence layer
+                              └── config/config.py         Runtime config (env vars + DB settings)
 ```
 
 ## Modules
 
 ### `frontend/`
-- React/Vite app that renders the transition dashboard
+- React/Vite app that renders the dashboard
 - MUI provides the shell, cards, tables, drawers, and dialogs
 - `react-terminal` provides the embedded operator terminal
 - Calls the existing FastAPI REST and SSE endpoints directly for health, stats, config, sessions, leads, chat, and scrape workflows
@@ -37,7 +33,7 @@ frontend/                   main.py  ── FastAPI / ASGI ───────
 
 ### `main.py`
 - FastAPI app instance with CORS middleware
-- Legacy inline SPA HTML (dark-theme chat UI) still served at `GET /`
+- Redirects `GET /` to `GET /dashboard/`
 - All REST endpoints under `/api/`
 - SSE streaming for `/api/chat` and `/api/scrape`
 - OpenAI chat assistant (LeadBot) with per-session history

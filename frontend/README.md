@@ -1,6 +1,6 @@
 # Frontend
 
-This package holds the React/Vite dashboard scaffold for LeadScraper Monster.
+This package holds the React/Vite dashboard for LeadScraper Monster.
 
 ## Local development
 
@@ -13,4 +13,4 @@ npm run dev
 
 - The app is mounted under `/dashboard/` when run through `vercel dev -L`
 - It currently calls only `GET /api/health`
-- The rest of the dashboard will be ported here incrementally
+- The dashboard uses the Python API directly

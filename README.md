@@ -5,7 +5,7 @@
 This repository now splits the UI and API:
 
 - `frontend/` contains the React dashboard scaffold
-- `main.py` contains the FastAPI API and the legacy dashboard during the transition
+- `main.py` contains the FastAPI API and redirects `/` to the React dashboard
 
 ## Demo
 

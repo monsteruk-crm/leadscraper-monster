@@ -7,7 +7,7 @@ B2B lead scraping SaaS deployed on Vercel with a Python/FastAPI API, a new React
 - [Architecture](architecture.md) — pipeline, modules, lead schema, database tables, SSE events
 - [Configuration](configuration.md) — environment variables and runtime settings
 - [Usage](usage.md) — local development, deployment, API reference, slash commands
-- [Dashboard](dashboard.md) — React scaffold status, UI guide, and migration notes
+- [Dashboard](dashboard.md) — React dashboard status and UI guide
 
 ## Architecture Decision Records
 
@@ -19,3 +19,4 @@ B2B lead scraping SaaS deployed on Vercel with a Python/FastAPI API, a new React
 - [005 — Semantic scrape-history resume](adr/005-semantic-scrape-history-resume.md)
 - [006 — multi-source search connectors](adr/006-multi-source-search-connectors.md)
 - [007 — Bing search fallback](adr/007-bing-search-fallback.md)
+- [008 — React dashboard only](adr/008-react-dashboard-only.md)

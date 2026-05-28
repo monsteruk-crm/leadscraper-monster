@@ -1,8 +1,7 @@
 # Dashboard
 
-The transition UI now lives in `frontend/` as a React/Vite app served at `/dashboard/`.
+The UI lives in `frontend/` as a React/Vite app served at `/dashboard/`.
 The deployment mounts the frontend at `/dashboard` and Vercel's trailing-slash routing normalizes the slashless `/dashboard` URL to `/dashboard/`, which keeps the Vite base path canonical during local `vercel dev` runs.
-The legacy Python dashboard still exists at `/` while the migration is in progress.
 
 The new shell is MUI-based and intentionally feature-shaped:
 
@@ -30,7 +29,7 @@ The new shell is MUI-based and intentionally feature-shaped:
 - embedded `react-terminal` chat panel
 - DB init/reset and export actions exposed in the React UI
 
-The React screen is now wired to the Python backend instead of mocked local data.
+The React screen is wired directly to the Python backend.
 
 ## React Shell
 
@@ -113,7 +112,6 @@ Settings now reads and writes the live config via:
 
 ## TODO
 
-- Port the remaining legacy Python-only flows so `/dashboard/` can replace `/`
 - Add richer run history and session history browsing beyond the current summary panels
 - Add more lead-sheet field editing once the API contract is stable for those fields
 - Decide whether live scrape feed history should persist per session or remain an in-memory operator view only
@@ -142,4 +140,4 @@ The React shell now uses the existing FastAPI contract directly:
 - `POST /api/chat`
 - `POST /api/scrape`
 
-The legacy Python UI still remains available at `/` while the React dashboard continues to absorb more of the product surface.
+`GET /` redirects to `/dashboard/`.
