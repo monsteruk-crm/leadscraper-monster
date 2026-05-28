@@ -42,9 +42,9 @@ npm install
 npm run dev
 ```
 
-### First-time DB initialisation
+### Database initialisation
 
-After starting for the first time, use **Init DB** from the React dashboard settings surfaces, or:
+The app now initialises the schema automatically on startup and before scrape/search-history requests. If you still need to force a repair, use **Init DB** from the React dashboard settings surfaces, or:
 
 ```bash
 curl -X POST http://localhost:3000/api/db/init
@@ -71,7 +71,7 @@ This project currently treats schema alignment as destructive-reset only. Update
 vercel --prod
 ```
 
-After deploying, set `DATABASE_URL` and `OPENAI_API_KEY` in the Vercel project settings, then visit the deployed URL and run **Init DB** from the React dashboard.
+After deploying, set `DATABASE_URL` and `OPENAI_API_KEY` in the Vercel project settings, then visit the deployed URL. The app will bootstrap its schema automatically; use **Init DB** only if you need to repair or re-seed a broken database manually.
 
 ## API Reference
 

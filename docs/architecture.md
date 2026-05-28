@@ -122,8 +122,10 @@ Async PostgreSQL layer via `asyncpg`. Uses a module-level connection pool (re-us
 - `get_pool()` — checks `pool._closed` and recreates the pool if needed (handles hot-reload and post-reset states).
 - `_close_pool()` — called by `reset_db()` after DDL so the next request gets a clean pool.
 - `get_conn()` — on `InterfaceError`/`OSError` it closes the pool (so the next request reconnects) and re-raises; no illegal double-yield retry.
+- `main.py` calls `init_db()` on startup and before scrape/search-history requests so schema bootstrap happens automatically even on a cold or reset database.
 
 **Settings seed:** `init_db()` inserts seed settings with `ON CONFLICT DO NOTHING` (safe to re-run). `reset_db()` always upserts the seed so defaults are restored after a wipe.
+If the target PostgreSQL instance cannot create `pg_trgm` or the semantic-history index, the app logs a warning and continues with exact per-source resume only.
 
 **Tables:**
 

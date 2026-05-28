@@ -245,7 +245,20 @@ INSERT INTO settings (
 async def init_db() -> None:
     """Idempotent schema bootstrap.  Safe to call on every startup."""
     async with get_conn() as conn:
-        await conn.execute(_DDL)
+        for statement in [s.strip() for s in _DDL.split(";") if s.strip()]:
+            try:
+                await conn.execute(statement)
+            except Exception as exc:
+                if statement.startswith("CREATE EXTENSION IF NOT EXISTS pg_trgm") or statement.startswith(
+                    "CREATE INDEX IF NOT EXISTS idx_semantic_history_query_trgm"
+                ):
+                    logger.warning(
+                        "Semantic history bootstrap step could not be completed; "
+                        "exact search resume will still work: %s",
+                        exc,
+                    )
+                    continue
+                raise
         await conn.execute(
             "ALTER TABLE search_runs ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'"
         )
@@ -743,20 +756,23 @@ async def set_semantic_search_progress(
         return
 
     async with get_conn() as conn:
-        await conn.execute(
-            """
-            INSERT INTO semantic_search_history (query_text, next_page, matched_runs, last_run_id, updated_at)
-            VALUES ($1, $2, 1, $3, NOW())
-            ON CONFLICT (query_text) DO UPDATE SET
-                next_page = EXCLUDED.next_page,
-                matched_runs = semantic_search_history.matched_runs + 1,
-                last_run_id = COALESCE(EXCLUDED.last_run_id, semantic_search_history.last_run_id),
-                updated_at = NOW()
-            """,
-            normalized,
-            max(0, int(next_page)),
-            run_id,
-        )
+        try:
+            await conn.execute(
+                """
+                INSERT INTO semantic_search_history (query_text, next_page, matched_runs, last_run_id, updated_at)
+                VALUES ($1, $2, 1, $3, NOW())
+                ON CONFLICT (query_text) DO UPDATE SET
+                    next_page = EXCLUDED.next_page,
+                    matched_runs = semantic_search_history.matched_runs + 1,
+                    last_run_id = COALESCE(EXCLUDED.last_run_id, semantic_search_history.last_run_id),
+                    updated_at = NOW()
+                """,
+                normalized,
+                max(0, int(next_page)),
+                run_id,
+            )
+        except Exception as exc:
+            logger.warning("Skipping semantic search history update: %s", exc)
 
 
 async def semantic_search_progress(
@@ -769,24 +785,28 @@ async def semantic_search_progress(
         return []
 
     async with get_conn() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT
-                query_text,
-                next_page,
-                matched_runs,
-                last_run_id,
-                updated_at,
-                similarity(query_text, $1) AS similarity
-            FROM semantic_search_history
-            WHERE query_text % $1 OR similarity(query_text, $1) >= $2
-            ORDER BY similarity DESC, updated_at DESC
-            LIMIT $3
-            """,
-            normalized,
-            similarity_threshold,
-            limit,
-        )
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    query_text,
+                    next_page,
+                    matched_runs,
+                    last_run_id,
+                    updated_at,
+                    similarity(query_text, $1) AS similarity
+                FROM semantic_search_history
+                WHERE query_text % $1 OR similarity(query_text, $1) >= $2
+                ORDER BY similarity DESC, updated_at DESC
+                LIMIT $3
+                """,
+                normalized,
+                similarity_threshold,
+                limit,
+            )
+        except Exception as exc:
+            logger.warning("Semantic search lookup unavailable: %s", exc)
+            return []
         return [dict(r) for r in rows]
 
 
@@ -795,7 +815,11 @@ async def resolve_search_progress(
     similarity_threshold: float = 0.32,
 ) -> dict[str, Any]:
     normalized = " ".join(query_text.lower().split())
-    exact_next_page = await get_search_progress(normalized)
+    exact_progress = await get_search_progress(normalized)
+    exact_next_page = max(
+        (int(state.get("next_page", 0)) for state in exact_progress.values()),
+        default=0,
+    )
     if exact_next_page > 0:
         return {
             "query_text": normalized,

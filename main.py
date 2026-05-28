@@ -84,6 +84,10 @@ class SearchHistoryResolveRequest(BaseModel):
     query: str
     similarity_threshold: float = 0.32
 
+
+async def _ensure_schema() -> None:
+    await db.init_db()
+
 # ── OpenAI system prompt ──────────────────────────────────────────────────────
 _SYSTEM_PROMPT = """You are LeadBot, an expert B2B lead generation strategist and analyst.
 
@@ -155,11 +159,15 @@ async def health():
 
 # ── DB bootstrap ──────────────────────────────────────────────────────────────
 
+@app.on_event("startup")
+async def startup_init_db() -> None:
+    await _ensure_schema()
+
 @app.post("/api/db/init")
 async def db_init():
     """Initialise (or migrate) the database schema. Idempotent."""
     try:
-        await db.init_db()
+        await _ensure_schema()
         return {"status": "ok", "message": "Schema initialised."}
     except Exception as exc:
         raise HTTPException(500, detail=str(exc))
@@ -276,6 +284,7 @@ async def chat(body: ChatRequest):
 async def scrape(body: ScrapeRequest):
     """Run the scraping pipeline and stream lead events as SSE."""
     try:
+        await _ensure_schema()
         settings = await db.get_settings()
         db.apply_settings_to_config(settings)
     except Exception:
@@ -338,7 +347,7 @@ async def scrape(body: ScrapeRequest):
                         {"next_page": next_page, "exhausted": False},
                     )
         except Exception as exc:
-            yield f"data: {json.dumps({'type':'error','content':f'DB init failed: {exc}'})}\n\n"
+            yield f"data: {json.dumps({'type':'error','content':f'Database setup failed: {exc}'})}\n\n"
             return
 
         async def on_lead(lead, sid):
@@ -527,6 +536,7 @@ async def get_search_history(
     limit: int = Query(5, ge=1, le=20),
     similarity_threshold: float = Query(0.32, ge=0.0, le=1.0),
 ):
+    await _ensure_schema()
     if not query.strip():
         return {"query": query, "matches": []}
     matches = await db.semantic_search_progress(
@@ -539,6 +549,7 @@ async def get_search_history(
 
 @app.post("/api/search-history/resolve")
 async def resolve_search_history(body: SearchHistoryResolveRequest):
+    await _ensure_schema()
     resolved = await db.resolve_search_progress(
         body.query,
         similarity_threshold=body.similarity_threshold,

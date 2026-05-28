@@ -1,4 +1,11 @@
 {
+  "redirects": [
+    {
+      "source": "/dashboard",
+      "destination": "/dashboard/",
+      "permanent": false
+    }
+  ],
   "experimentalServices": {
     "frontend": {
       "entrypoint": "frontend",

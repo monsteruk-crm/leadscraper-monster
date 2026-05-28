@@ -1,6 +1,7 @@
 # Dashboard
 
 The transition UI now lives in `frontend/` as a React/Vite app served at `/dashboard/`.
+The deployment also redirects the slashless `/dashboard` URL to `/dashboard/` so the Vite base path stays canonical during local `vercel dev` runs.
 The legacy Python dashboard still exists at `/` while the migration is in progress.
 
 The new shell is MUI-based and intentionally feature-shaped:
