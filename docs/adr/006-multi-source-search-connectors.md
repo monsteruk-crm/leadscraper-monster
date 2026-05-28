@@ -1,4 +1,4 @@
-# 005 — Multi-source search connectors
+# 006 — Multi-source search connectors
 
 **Status:** Accepted
 

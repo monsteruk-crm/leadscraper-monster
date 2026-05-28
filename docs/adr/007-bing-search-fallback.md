@@ -1,4 +1,4 @@
-# 006 — Bing search fallback
+# 007 — Bing search fallback
 
 **Status:** Accepted
 
