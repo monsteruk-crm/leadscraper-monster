@@ -1,5 +1,4 @@
 {
-  "trailingSlash": true,
   "experimentalServices": {
     "frontend": {
       "entrypoint": "frontend",

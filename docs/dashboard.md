@@ -1,7 +1,7 @@
 # Dashboard
 
 The UI lives in `frontend/` as a React/Vite app served at `/dashboard/`.
-The deployment mounts the frontend at `/dashboard` and Vercel's trailing-slash routing normalizes the slashless `/dashboard` URL to `/dashboard/`, which keeps the Vite base path canonical during local `vercel dev` runs.
+The deployment mounts the frontend at `/dashboard/`, which keeps the Vite base path canonical during local `vercel dev` runs.
 
 The new shell is MUI-based and intentionally feature-shaped:
 
