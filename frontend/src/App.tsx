@@ -484,6 +484,7 @@ function App() {
   const [liveScrapeFeed, setLiveScrapeFeed] = useState<ScrapeFeedItem[]>([])
   const [liveScrapeMessages, setLiveScrapeMessages] = useState<string[]>([])
   const [liveScrapeFeedPage, setLiveScrapeFeedPage] = useState(1)
+  const [terminalShellResetToken, setTerminalShellResetToken] = useState(0)
   const terminalShell = useContext(TerminalContext)
 
   const blurActiveElement = useCallback(() => {
@@ -794,6 +795,16 @@ function App() {
     setRenameSessionValue(session.name)
   }, [])
 
+  const resetConversationView = useCallback(async () => {
+    setSessionHistory([])
+    terminalShell.setBufferedContent('')
+    terminalShell.setTemporaryContent('')
+    setTerminalError(null)
+    setTerminalStatus('Ready')
+    setTerminalShellResetToken((current) => current + 1)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+  }, [terminalShell])
+
   const handleCreateSession = useCallback(async () => {
     setWorking(true)
     setError(null)
@@ -806,6 +817,7 @@ function App() {
       })
       setNewSessionName('')
       await loadSessions()
+      await resetConversationView()
       setActiveSession(payload)
       setNotice(`Created session #${payload.id}`)
       setSessionsOpen(true)
@@ -814,7 +826,7 @@ function App() {
     } finally {
       setWorking(false)
     }
-  }, [loadSessions, newSessionName, setActiveSession])
+  }, [loadSessions, newSessionName, resetConversationView, setActiveSession])
 
   const handleRenameSession = useCallback(async () => {
     if (!activeSessionId || !renameSessionValue.trim()) {
@@ -1410,6 +1422,7 @@ function App() {
             body: JSON.stringify(parts.join(' ').trim() ? { name: parts.join(' ').trim() } : {}),
           })
           await loadSessions()
+          await resetConversationView()
           setActiveSession(session)
           setTerminalStatus(`Created session #${session.id}`)
           return `Created session #${session.id} ${session.name}`
@@ -1551,6 +1564,7 @@ function App() {
       loadStats,
       runChatCommand,
       runScrapeCommand,
+      resetConversationView,
       sessions,
       setActiveSession,
       statusFilter,
@@ -1909,6 +1923,7 @@ function App() {
                     }}
                   >
                     <ReactTerminal
+                      key={terminalShellResetToken}
                       commands={terminalCommands}
                       welcomeMessage={
                         <Box component="div" sx={{ display: 'block', mb: 1 }}>

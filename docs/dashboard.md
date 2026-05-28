@@ -100,6 +100,8 @@ It includes commands for:
 - `/search <query>`
 - `/scrape [kw1, kw2]`
 
+`/new` now behaves as a hard conversation reset in the UI: it creates a fresh session, clears the terminal output, and empties the currently shown session-history panel before the next message.
+
 ### Settings tab
 
 Settings now reads and writes the live config via:

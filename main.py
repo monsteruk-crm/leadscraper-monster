@@ -112,7 +112,8 @@ Context:
 When scrape results appear in the conversation, refer to them concretely.
 Be concise, strategic, and actionable. Avoid generic advice."""
 
-MAX_CONTEXT_USER_TURNS = 3
+MAX_CONTEXT_TURNS = 8
+MAX_SEARCH_CONTEXT_TURNS = 4
 REFERENTIAL_MARKERS = (
     "same",
     "also",
@@ -153,17 +154,21 @@ def _is_referential_follow_up(message: str) -> bool:
     return any(marker in text for marker in REFERENTIAL_MARKERS)
 
 
-def _build_chat_input(turns: list[dict], current_message: str):
-    if not _is_referential_follow_up(current_message):
+def _build_chat_input(turns: list[dict], current_message: str, needs_web_search: bool):
+    chat_turns = [
+        {"role": turn["role"], "content": turn["content"]}
+        for turn in turns
+        if turn.get("mode") == "chat" and turn.get("role") in {"user", "assistant"}
+    ]
+
+    if not chat_turns:
         return current_message
 
-    previous_user_turns = [
-        {"role": "user", "content": turn["content"]}
-        for turn in turns
-        if turn.get("mode") == "chat" and turn.get("role") == "user"
-    ][-MAX_CONTEXT_USER_TURNS:]
-    previous_user_turns.append({"role": "user", "content": current_message})
-    return previous_user_turns
+    if needs_web_search and not _is_referential_follow_up(current_message):
+        return current_message
+
+    limit = MAX_SEARCH_CONTEXT_TURNS if needs_web_search else MAX_CONTEXT_TURNS
+    return chat_turns[-limit:] + [{"role": "user", "content": current_message}]
 
 def _json_serial(obj):
     import datetime
@@ -292,7 +297,7 @@ async def chat(body: ChatRequest):
     async def sse_stream():
         try:
             needs_web_search = _requires_web_search(body.message)
-            input_payload = _build_chat_input(turns, body.message)
+            input_payload = _build_chat_input(turns, body.message, needs_web_search)
             tool_config = {"type": "web_search", "search_context_size": "medium"}
             request_kwargs = {
                 "model": cfg.OPENAI_MODEL,
