@@ -235,7 +235,7 @@ async def rename_session(session_id: int, body: SessionRename):
 
 @app.post("/api/chat")
 async def chat(body: ChatRequest):
-    """Stream an OpenAI chat response as Server-Sent Events."""
+    """Stream an OpenAI chat response with web search as Server-Sent Events."""
     from openai import AsyncOpenAI
 
     if not cfg.OPENAI_API_KEY:
@@ -258,10 +258,11 @@ async def chat(body: ChatRequest):
             stream = await client.chat.completions.create(
                 model=cfg.OPENAI_MODEL,
                 messages=messages,
-                stream=True,
-                max_completion_tokens=600,
-                temperature=0.4,
-            )
+            stream=True,
+            max_completion_tokens=600,
+            temperature=0.4,
+            web_search_options={"search_context_size": "medium"},
+        )
             async for chunk in stream:
                 token = chunk.choices[0].delta.content
                 if token:

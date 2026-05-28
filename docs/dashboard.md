@@ -78,22 +78,26 @@ The left navigation now syncs the active tab and scrolls the main content sectio
 The terminal is embedded in the dashboard using `react-terminal`.
 
 - Plain text is sent to `POST /api/chat`
-- Explicit commands remain available for operator workflows
+- Explicit commands must start with `/`
 
 It includes commands for:
 
-- `help`
-- `health`
-- `stats`
-- `sessions`
-- `new [name]`
-- `load <session_id>`
-- `name <new name>`
-- `history [limit]`
-- `config`
-- `leads`
-- `chat <message>`
-- `scrape [kw1, kw2]`
+- `/help`
+- `/health`
+- `/stats`
+- `/sessions`
+- `/new [name]`
+- `/load <session_id>`
+- `/name <new name>`
+- `/history [limit]`
+- `/config`
+- `/leads`
+- `/export`
+- `/dbinit`
+- `/dbreset`
+- `/clear`
+- `/chat <message>`
+- `/scrape [kw1, kw2]`
 
 ### Settings tab
 

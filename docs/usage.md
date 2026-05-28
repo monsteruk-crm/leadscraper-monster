@@ -105,7 +105,7 @@ The new React dashboard uses this endpoint as its first live API check.
 ### Chat
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/chat` | Stream LeadBot reply as SSE tokens |
+| `POST` | `/api/chat` | Stream LeadBot reply as SSE tokens, with OpenAI web search enabled |
 
 ### Scrape
 | Method | Path | Description |
@@ -157,18 +157,23 @@ New retrieval endpoints for search-depth history:
 
 ## Slash Commands (Chat UI)
 
+Plain text in the terminal is treated as chat. Commands must start with `/`.
+
 | Command | Description |
 |---|---|
-| `/scrape kw1, kw2` | Run scraper with given keywords |
-| `/results [N]` | Show N most recent leads in chat (default 10) |
-| `/config` | Open Settings modal |
-| `/sessions` | Open Sessions modal |
+| `/help` | Show all commands |
+| `/health` | Check API and database health |
+| `/stats` | Show current lead/session/run counts |
+| `/sessions` | List sessions |
 | `/new [name]` | Start a new session |
 | `/load <id>` | Load a previous session by ID |
 | `/name <name>` | Rename the current session |
-| `/recall <query>` | Ask LeadBot to search conversation history |
-| `/history` | Show recent turns summary |
-| `/clear` | Clear the chat view (DB history preserved) |
-| `/help` | Show all commands |
-
-Any other text is sent to LeadBot (OpenAI chat).
+| `/history [limit]` | Show recent turns summary |
+| `/config` | Show current config |
+| `/leads [search]` | Query the lead table from chat |
+| `/export` | Open the CSV export |
+| `/dbinit` | Initialise the database schema |
+| `/dbreset` | Reset the database schema |
+| `/clear` | Clear the visible terminal output |
+| `/chat <message>` | Send an explicit chat message |
+| `/scrape kw1, kw2` | Run scraper with given keywords |

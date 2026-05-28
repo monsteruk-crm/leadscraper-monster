@@ -29,6 +29,7 @@ frontend/                    │     ├── scraper/enricher.py  OpenAI enric
 - MUI provides the shell, cards, tables, drawers, and dialogs
 - `react-terminal` provides the embedded operator terminal
 - Calls the existing FastAPI REST and SSE endpoints directly for health, stats, config, sessions, leads, chat, and scrape workflows
+- Uses slash-prefixed terminal commands, while plain text is routed to LeadBot chat
 - Uses `/dashboard/` as its Vercel route prefix
 
 ### `main.py`
@@ -36,7 +37,7 @@ frontend/                    │     ├── scraper/enricher.py  OpenAI enric
 - Redirects `GET /` to `GET /dashboard/`
 - All REST endpoints under `/api/`
 - SSE streaming for `/api/chat` and `/api/scrape`
-- OpenAI chat assistant (LeadBot) with per-session history
+- OpenAI chat assistant (LeadBot) with per-session history and web search enabled
 - `_resolve_session(session_id)` — validates the session exists before use; falls back to the latest session or creates a new one (prevents FK violations after Reset DB)
 
 ### `scraper/models.py`

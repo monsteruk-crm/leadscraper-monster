@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   AppBar,
@@ -38,7 +38,7 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material'
-import { ReactTerminal } from 'react-terminal'
+import { ReactTerminal, TerminalContext } from 'react-terminal'
 import type { SxProps, Theme } from '@mui/material/styles'
 
 type HealthResponse = {
@@ -484,6 +484,7 @@ function App() {
   const [liveScrapeFeed, setLiveScrapeFeed] = useState<ScrapeFeedItem[]>([])
   const [liveScrapeMessages, setLiveScrapeMessages] = useState<string[]>([])
   const [liveScrapeFeedPage, setLiveScrapeFeedPage] = useState(1)
+  const terminalShell = useContext(TerminalContext)
 
   const blurActiveElement = useCallback(() => {
     const active = document.activeElement
@@ -1331,38 +1332,51 @@ function App() {
     [terminalBusy],
   )
 
+  const commandHelpText = useMemo(
+    () => [
+      'Slash commands:',
+      '/help',
+      '/health',
+      '/stats',
+      '/sessions',
+      '/new [name]',
+      '/load <session_id>',
+      '/name <new name>',
+      '/history [limit]',
+      '/config',
+      '/leads [search]',
+      '/export',
+      '/dbinit',
+      '/dbreset',
+      '/clear',
+      '/chat <message>',
+      '/scrape [kw1, kw2]',
+      '',
+      'Plain text is treated as chat.',
+    ].join('\n'),
+    [],
+  )
+
+  const clearTerminalOutput = useCallback(async () => {
+    terminalShell.setBufferedContent('')
+    terminalShell.setTemporaryContent('')
+    setTerminalError(null)
+    setTerminalStatus('Ready')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    return ''
+  }, [terminalShell])
+
   const terminalCommands = useMemo(
     () => ({
-      help: () =>
-        executeTerminalTask(() =>
-          [
-            'Plain text is sent to the AI chat endpoint.',
-            '',
-            'Commands:',
-            'health',
-            'stats',
-            'sessions',
-            'new [name]',
-            'load <session_id>',
-            'name <new name>',
-            'history [limit]',
-            'config',
-            'leads [search]',
-            'export',
-            'dbinit',
-            'dbreset',
-            'chat <message>',
-            'scrape [kw1, kw2]',
-          ].join('\n'),
-        ),
-      health: async () =>
+      '/help': () => executeTerminalTask(() => commandHelpText),
+      '/health': async () =>
         executeTerminalTask(async () => {
           setTerminalStatus('Loading health...')
           const payload = await loadHealth()
           setTerminalStatus('Health loaded')
           return `status: ${payload.status}\ndatabase: ${payload.db ?? 'unknown'}\nleads: ${payload.leads ?? 0}\nruns: ${payload.runs ?? 0}`
         }),
-      stats: async () =>
+      '/stats': async () =>
         executeTerminalTask(async () => {
           setTerminalStatus('Loading stats...')
           const payload = await loadStats()
@@ -1374,7 +1388,7 @@ function App() {
             `sessions: ${payload.sessions}`,
           ].join('\n')
         }),
-      sessions: async () =>
+      '/sessions': async () =>
         executeTerminalTask(async () => {
           setTerminalStatus('Loading sessions...')
           const payload = await loadSessions()
@@ -1386,7 +1400,7 @@ function App() {
             .map((session) => `#${session.id} ${session.name} | ${session.turn_count ?? 0} turns | ${formatRelativeTime(session.updated_at)}`)
             .join('\n')
         }),
-      new: async (...parts: string[]) =>
+      '/new': async (...parts: string[]) =>
         executeTerminalTask(async () => {
           setTerminalStatus('Creating session...')
           const session = await fetchJson<SessionRecord>('/api/sessions', {
@@ -1399,11 +1413,11 @@ function App() {
           setTerminalStatus(`Created session #${session.id}`)
           return `Created session #${session.id} ${session.name}`
         }),
-      load: async (sessionIdRaw: string) =>
+      '/load': async (sessionIdRaw: string) =>
         executeTerminalTask(async () => {
           const sessionId = Number.parseInt(sessionIdRaw, 10)
           if (Number.isNaN(sessionId)) {
-            return 'Usage: load <session_id>'
+            return 'Usage: /load <session_id>'
           }
           setTerminalStatus(`Loading session #${sessionId}...`)
           const payload = await loadSessionHistory(sessionId)
@@ -1413,11 +1427,11 @@ function App() {
           setTerminalStatus(`Loaded session #${sessionId}`)
           return `Loaded session #${sessionId} with ${payload.length} turns`
         }),
-      name: async (...parts: string[]) =>
+      '/name': async (...parts: string[]) =>
         executeTerminalTask(async () => {
           const nextName = parts.join(' ').trim()
           if (!activeSessionId || !nextName) {
-            return 'Usage: name <new name>'
+            return 'Usage: /name <new name>'
           }
           setTerminalStatus(`Renaming session #${activeSessionId}...`)
           await fetchJson<{ status: string }>(`/api/sessions/${activeSessionId}/rename`, {
@@ -1431,7 +1445,7 @@ function App() {
           setTerminalStatus(`Renamed session #${activeSessionId}`)
           return `Renamed session #${activeSessionId} to ${nextName}`
         }),
-      history: async (limitRaw = '10') =>
+      '/history': async (limitRaw = '10') =>
         executeTerminalTask(async () => {
           if (!activeSessionId) {
             return 'No active session.'
@@ -1451,7 +1465,7 @@ function App() {
             })
             .join('\n')
         }),
-      config: async () =>
+      '/config': async () =>
         executeTerminalTask(async () => {
           setTerminalStatus('Loading config...')
           const payload = await loadConfig()
@@ -1465,7 +1479,7 @@ function App() {
             `ai_confidence_threshold: ${payload.ai_confidence_threshold}`,
           ].join('\n')
         }),
-      leads: async (...parts: string[]) =>
+      '/leads': async (...parts: string[]) =>
         executeTerminalTask(async () => {
           const query = parts.join(' ').trim()
           setTerminalStatus(`Loading leads${query ? ` for "${query}"` : ''}...`)
@@ -1489,32 +1503,33 @@ function App() {
             .map((lead) => `${lead.company_name ?? '-'} | ${buildContactName(lead)} | ${(lead.confidence ?? 0).toFixed(2)}`)
             .join('\n')
         }),
-      export: () =>
+      '/export': () =>
         executeTerminalTask(() => {
           setTerminalStatus('Opening CSV export...')
           handleExportLeads()
           setTerminalStatus('CSV export opened')
           return 'Opened CSV export in a new tab.'
         }),
-      dbinit: async () =>
+      '/dbinit': async () =>
         executeTerminalTask(async () => {
           setTerminalStatus('Initialising database...')
           const didInit = await handleDbInit()
           setTerminalStatus(didInit ? 'Database initialised' : 'Database initialisation failed')
           return didInit ? 'Database initialised.' : 'Database initialisation failed.'
         }),
-      dbreset: async () =>
+      '/dbreset': async () =>
         executeTerminalTask(async () => {
           setTerminalStatus('Resetting database...')
           const didReset = await handleDbReset()
           setTerminalStatus(didReset ? 'Database reset complete' : 'Database reset cancelled')
           return didReset ? 'Database reset requested.' : 'Database reset cancelled.'
         }),
-      chat: async (...parts: string[]) => executeTerminalTask(() => runChatCommand(parts.join(' ').trim())),
-      scrape: async (...parts: string[]) => executeTerminalTask(() => runScrapeCommand(parts.join(' '))),
+      '/chat': async (...parts: string[]) => executeTerminalTask(() => runChatCommand(parts.join(' ').trim())),
+      '/scrape': async (...parts: string[]) => executeTerminalTask(() => runScrapeCommand(parts.join(' '))),
     }),
     [
       activeSessionId,
+      commandHelpText,
       executeTerminalTask,
       handleDbInit,
       handleDbReset,
@@ -1537,6 +1552,23 @@ function App() {
       setActiveSession,
       statusFilter,
     ],
+  )
+
+  const handleTerminalDefault = useCallback(
+    async (command: string) => {
+      const trimmed = command.trim()
+      if (!trimmed) {
+        return 'Type a message or /help.'
+      }
+      if (trimmed.startsWith('/clear')) {
+        return clearTerminalOutput()
+      }
+      if (trimmed.startsWith('/')) {
+        return `Unknown command: ${trimmed.split(/\s+/)[0]}\nType /help for a list of commands.`
+      }
+      return runChatCommand(trimmed)
+    },
+    [clearTerminalOutput, runChatCommand],
   )
 
   const apiChipLabel = dashboardLoading
@@ -1877,14 +1909,14 @@ function App() {
                       commands={terminalCommands}
                       welcomeMessage={
                         <Box component="div" sx={{ display: 'block', mb: 1 }}>
-                          LeadScraper Monster terminal. Type a normal message to chat with the AI, or type help to inspect available commands.
+                          LeadScraper Monster terminal. Plain text chats with LeadBot. Commands must start with `/`, for example `/help`.
                         </Box>
                       }
                       prompt="monster"
                       theme="dracula"
                       showControlBar
                       showControlButtons
-                      defaultHandler={(command: string) => runChatCommand(command)}
+                      defaultHandler={handleTerminalDefault}
                     />
                   </Box>
                 </Stack>
@@ -2370,7 +2402,7 @@ function App() {
                       Terminal behavior
                     </Typography>
                     <Typography variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
-                      summarize the current dashboard state{'\n'}what changed after the last scrape?{'\n'}help{'\n'}stats{'\n'}sessions{'\n'}new q2 dental{'\n'}load 12{'\n'}name UK operators{'\n'}config{'\n'}leads logistics{'\n'}export{'\n'}dbinit{'\n'}dbreset{'\n'}scrape dental clinics london
+                      summarize the current dashboard state{'\n'}what changed after the last scrape?{'\n'}/help{'\n'}/stats{'\n'}/sessions{'\n'}/new q2 dental{'\n'}/load 12{'\n'}/name UK operators{'\n'}/config{'\n'}/leads logistics{'\n'}/export{'\n'}/dbinit{'\n'}/dbreset{'\n'}/scrape dental clinics london{'\n'}/clear
                     </Typography>
                   </Paper>
                 </Stack>
