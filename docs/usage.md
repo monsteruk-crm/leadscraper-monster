@@ -105,7 +105,7 @@ The new React dashboard uses this endpoint as its first live API check.
 ### Chat
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/chat` | Stream LeadBot reply as SSE tokens, with OpenAI web search enabled |
+| `POST` | `/api/chat` | Stream LeadBot reply as SSE tokens via the OpenAI Responses API with web search enabled; each request is answered from the current message |
 
 ### Scrape
 | Method | Path | Description |
@@ -176,4 +176,5 @@ Plain text in the terminal is treated as chat. Commands must start with `/`.
 | `/dbreset` | Reset the database schema |
 | `/clear` | Clear the visible terminal output |
 | `/chat <message>` | Send an explicit chat message |
+| `/search <query>` | Force a web-search chat request |
 | `/scrape kw1, kw2` | Run scraper with given keywords |

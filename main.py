@@ -105,25 +105,65 @@ Context:
   last_touch, opt_out
 - The user triggers scraping with /scrape -- you do not run it yourself
 - You are embedded in a web UI (not a terminal)
+- Ignore scrape summaries stored in session history unless the user is explicitly asking about a scrape result
+- For an explicit web-search request, actually search the web instead of asking unnecessary follow-up questions
+- Prefer the current user message over older topics; only use prior chat context when the latest message is clearly referential
 
 When scrape results appear in the conversation, refer to them concretely.
 Be concise, strategic, and actionable. Avoid generic advice."""
 
-MAX_HISTORY_TURNS = 20
-TRUNCATE_AT = 1200
+MAX_CONTEXT_USER_TURNS = 3
+REFERENTIAL_MARKERS = (
+    "same",
+    "also",
+    "another",
+    "other one",
+    "that one",
+    "this one",
+    "it too",
+    "them too",
+    "continue",
+    "follow up",
+    "follow-up",
+    "again",
+    "instead",
+    "else",
+)
 
 
-def _build_openai_messages(turns: list[dict]) -> list[dict]:
-    recent = turns[-MAX_HISTORY_TURNS:]
-    messages = []
-    for i, t in enumerate(recent):
-        content = t["content"]
-        is_recent = i >= len(recent) - 4
-        if not is_recent and len(content) > TRUNCATE_AT:
-            content = content[:TRUNCATE_AT] + "\n[...truncated...]"
-        messages.append({"role": t["role"], "content": content})
-    return messages
+def _requires_web_search(message: str) -> bool:
+    text = message.lower()
+    return any(
+        phrase in text
+        for phrase in (
+            "search the web",
+            "look on the web",
+            "look up",
+            "find online",
+            "search online",
+            "find any email",
+            "find email address",
+            "find email addresses",
+        )
+    )
 
+
+def _is_referential_follow_up(message: str) -> bool:
+    text = message.lower()
+    return any(marker in text for marker in REFERENTIAL_MARKERS)
+
+
+def _build_chat_input(turns: list[dict], current_message: str):
+    if not _is_referential_follow_up(current_message):
+        return current_message
+
+    previous_user_turns = [
+        {"role": "user", "content": turn["content"]}
+        for turn in turns
+        if turn.get("mode") == "chat" and turn.get("role") == "user"
+    ][-MAX_CONTEXT_USER_TURNS:]
+    previous_user_turns.append({"role": "user", "content": current_message})
+    return previous_user_turns
 
 def _json_serial(obj):
     import datetime
@@ -235,39 +275,51 @@ async def rename_session(session_id: int, body: SessionRename):
 
 @app.post("/api/chat")
 async def chat(body: ChatRequest):
-    """Stream an OpenAI chat response with web search as Server-Sent Events."""
+    """Stream an OpenAI response with web search as Server-Sent Events."""
     from openai import AsyncOpenAI
 
     if not cfg.OPENAI_API_KEY:
         raise HTTPException(503, detail="OPENAI_API_KEY not configured.")
 
     session_id = await _resolve_session(body.session_id)
-
     turns = await db.get_turns(session_id)
-    await db.add_turn(session_id, "user", body.message, "chat")
 
-    messages = [{"role": "system", "content": _SYSTEM_PROMPT}] + \
-               _build_openai_messages(turns) + \
-               [{"role": "user", "content": body.message}]
+    await db.add_turn(session_id, "user", body.message, "chat")
 
     client = AsyncOpenAI(api_key=cfg.OPENAI_API_KEY)
     full_reply = []
 
     async def sse_stream():
         try:
-            stream = await client.chat.completions.create(
-                model=cfg.OPENAI_MODEL,
-                messages=messages,
-            stream=True,
-            max_completion_tokens=600,
-            temperature=0.4,
-            web_search_options={"search_context_size": "medium"},
-        )
-            async for chunk in stream:
-                token = chunk.choices[0].delta.content
-                if token:
-                    full_reply.append(token)
-                    yield f"data: {json.dumps({'type':'token','content':token,'session_id':session_id})}\n\n"
+            needs_web_search = _requires_web_search(body.message)
+            input_payload = _build_chat_input(turns, body.message)
+            tool_config = {"type": "web_search", "search_context_size": "medium"}
+            request_kwargs = {
+                "model": cfg.OPENAI_MODEL,
+                "instructions": _SYSTEM_PROMPT,
+                "input": input_payload,
+                "tools": [tool_config],
+                "max_output_tokens": 600,
+                "temperature": 0.4,
+            }
+            if needs_web_search:
+                request_kwargs["tool_choice"] = {
+                    "type": "allowed_tools",
+                    "mode": "required",
+                    "tools": [{"type": "web_search"}],
+                }
+
+            async with client.responses.stream(
+                **request_kwargs,
+            ) as stream:
+                async for event in stream:
+                    if event.type == "response.output_text.delta":
+                        token = event.delta
+                        if token:
+                            full_reply.append(token)
+                            yield f"data: {json.dumps({'type':'token','content':token,'session_id':session_id})}\n\n"
+                    elif event.type == "response.output_text.done" and not full_reply and event.text:
+                        full_reply.append(event.text)
         except Exception as exc:
             yield f"data: {json.dumps({'type':'error','content':str(exc)})}\n\n"
             return

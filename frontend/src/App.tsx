@@ -1350,6 +1350,7 @@ function App() {
       '/dbreset',
       '/clear',
       '/chat <message>',
+      '/search <query>',
       '/scrape [kw1, kw2]',
       '',
       'Plain text is treated as chat.',
@@ -1525,6 +1526,8 @@ function App() {
           return didReset ? 'Database reset requested.' : 'Database reset cancelled.'
         }),
       '/chat': async (...parts: string[]) => executeTerminalTask(() => runChatCommand(parts.join(' ').trim())),
+      '/search': async (...parts: string[]) =>
+        executeTerminalTask(() => runChatCommand(`search the web for ${parts.join(' ').trim()}`.trim())),
       '/scrape': async (...parts: string[]) => executeTerminalTask(() => runScrapeCommand(parts.join(' '))),
     }),
     [
@@ -1555,8 +1558,8 @@ function App() {
   )
 
   const handleTerminalDefault = useCallback(
-    async (command: string) => {
-      const trimmed = command.trim()
+    async (command: string, args = '') => {
+      const trimmed = [command, args].filter(Boolean).join(' ').trim()
       if (!trimmed) {
         return 'Type a message or /help.'
       }

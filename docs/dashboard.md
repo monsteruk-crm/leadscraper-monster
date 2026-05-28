@@ -97,6 +97,7 @@ It includes commands for:
 - `/dbreset`
 - `/clear`
 - `/chat <message>`
+- `/search <query>`
 - `/scrape [kw1, kw2]`
 
 ### Settings tab

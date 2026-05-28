@@ -37,7 +37,7 @@ frontend/                    │     ├── scraper/enricher.py  OpenAI enric
 - Redirects `GET /` to `GET /dashboard/`
 - All REST endpoints under `/api/`
 - SSE streaming for `/api/chat` and `/api/scrape`
-- OpenAI chat assistant (LeadBot) with per-session history and web search enabled
+- OpenAI chat assistant (LeadBot) backed by the Responses API with web search enabled; explicit web-search requests force the web-search tool, while only referential follow-ups reuse a small slice of prior user chat context
 - `_resolve_session(session_id)` — validates the session exists before use; falls back to the latest session or creates a new one (prevents FK violations after Reset DB)
 
 ### `scraper/models.py`
