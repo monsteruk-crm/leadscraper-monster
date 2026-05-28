@@ -15,6 +15,7 @@ import {
   Drawer,
   FormControlLabel,
   LinearProgress,
+  Pagination,
   List,
   ListItem,
   ListItemButton,
@@ -482,6 +483,7 @@ function App() {
   const [terminalError, setTerminalError] = useState<string | null>(null)
   const [liveScrapeFeed, setLiveScrapeFeed] = useState<ScrapeFeedItem[]>([])
   const [liveScrapeMessages, setLiveScrapeMessages] = useState<string[]>([])
+  const [liveScrapeFeedPage, setLiveScrapeFeedPage] = useState(1)
 
   const blurActiveElement = useCallback(() => {
     const active = document.activeElement
@@ -1185,6 +1187,7 @@ function App() {
       setTerminalStatus(`Starting scrape for ${finalKeywords.join(', ')}`)
       setTab('Leads')
       setLiveScrapeFeed([])
+      setLiveScrapeFeedPage(1)
       setLiveScrapeMessages([`Starting scrape for ${finalKeywords.join(', ')}`])
       const lines: string[] = [`scrape: ${finalKeywords.join(', ')}`]
       const response = await fetch('/api/scrape', {
@@ -1256,6 +1259,7 @@ function App() {
               },
               ...current,
             ].slice(0, 12))
+            setLiveScrapeFeedPage(1)
           }
           if (event.type === 'warning') {
             const message = String(event.msg ?? 'Scrape warning')
@@ -1543,6 +1547,12 @@ function App() {
 
   const connectionColor = error ? 'error' : health?.status === 'ok' ? 'success' : 'default'
   const leadDrawerActionLabel = leadDetail?.archived ? 'Restore lead' : 'Archive lead'
+  const liveScrapeFeedPageSize = 5
+  const liveScrapeFeedPageCount = Math.max(1, Math.ceil(liveScrapeFeed.length / liveScrapeFeedPageSize))
+  const liveScrapeFeedVisible = liveScrapeFeed.slice(
+    (liveScrapeFeedPage - 1) * liveScrapeFeedPageSize,
+    liveScrapeFeedPage * liveScrapeFeedPageSize,
+  )
   const handleNavigate = useCallback((nextTab: NavItem) => {
     setTab(nextTab)
     contentSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -2138,102 +2148,115 @@ function App() {
                       gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 2fr) minmax(320px, 1fr)' },
                     }}
                   >
-                    <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'rgba(255,255,255,0.02)' }}>
-                      <Table size="small" stickyHeader>
-                        <TableHead>
-                          <TableRow>
-                            {[
-                              ['Company', 'company_name'],
-                              ['Contact', 'contact_name'],
-                              ['Role', 'role'],
-                              ['Email', 'email'],
-                              ['Phone', 'phone'],
-                              ['City', 'city'],
-                              ['Country', 'country'],
-                              ['Category', 'category'],
-                              ['Confidence', 'confidence'],
-                              ['Status', 'status'],
-                              ['Created', 'created_at'],
-                            ].map(([label, field]) => (
-                              <TableCell key={field} sortDirection={leadSortBy === field ? leadSortDir : false}>
-                                <TableSortLabel
-                                  active={leadSortBy === field}
-                                  direction={leadSortBy === field ? leadSortDir : 'asc'}
-                                  onClick={() => handleLeadSort(field as LeadSortField)}
-                                >
-                                  {label}
-                                </TableSortLabel>
-                              </TableCell>
-                            ))}
-                            <TableCell align="right">Action</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {leadResponse.leads.map((lead) => (
-                            <TableRow hover key={lead.id} sx={{ cursor: 'pointer' }} onClick={() => openLeadDetails(lead)}>
-                              <TableCell>{lead.company_name ?? '-'}</TableCell>
-                              <TableCell>{buildContactName(lead)}</TableCell>
-                              <TableCell>{lead.role ?? lead.title ?? '-'}</TableCell>
-                              <TableCell>{lead.email ?? '-'}</TableCell>
-                              <TableCell>{lead.phone ?? '-'}</TableCell>
-                              <TableCell>{lead.city ?? '-'}</TableCell>
-                              <TableCell>{lead.country ?? '-'}</TableCell>
-                              <TableCell>{lead.category ?? '-'}</TableCell>
-                              <TableCell>{leadConfidence(lead).toFixed(2)}</TableCell>
-                              <TableCell onClick={(event) => event.stopPropagation()}>
-                                {lead.archived ? (
-                                  <Typography variant="body2" color="text.secondary">
-                                    Archived
-                                  </Typography>
-                                ) : (
-                                  <TextField
-                                    select
-                                    size="small"
-                                    variant="standard"
-                                    value={lead.status ?? 'New'}
-                                    onChange={(event) => {
-                                      void handleLeadPatch(
-                                        lead.id,
-                                        { status: event.target.value },
-                                        `Updated lead #${lead.id} status`,
-                                      )
-                                    }}
-                                    sx={{ minWidth: 120 }}
-                                  >
-                                    {leadStatusOptions.map((status) => (
-                                      <MenuItem key={status} value={status}>
-                                        {status}
-                                      </MenuItem>
-                                    ))}
-                                  </TextField>
-                                )}
-                              </TableCell>
-                              <TableCell>{formatDateTime(lead.created_at)}</TableCell>
-                              <TableCell align="right">
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    void handleArchiveToggle(lead)
-                                  }}
-                                >
-                                  {lead.archived ? 'Restore' : 'Archive'}
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                          {leadResponse.leads.length === 0 && (
+                    <TableContainer
+                      component={Paper}
+                      variant="outlined"
+                      sx={{
+                        bgcolor: 'rgba(255,255,255,0.02)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        minHeight: 0,
+                        height: { xs: 'auto', xl: 'calc(100vh - 360px)' },
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+                        <Table size="small" stickyHeader>
+                          <TableHead>
                             <TableRow>
-                              <TableCell colSpan={12}>
-                                <Typography variant="body2" color="text.secondary">
-                                  No leads match the current filters.
-                                </Typography>
-                              </TableCell>
+                              {[
+                                ['Company', 'company_name'],
+                                ['Contact', 'contact_name'],
+                                ['Role', 'role'],
+                                ['Email', 'email'],
+                                ['Phone', 'phone'],
+                                ['City', 'city'],
+                                ['Country', 'country'],
+                                ['Category', 'category'],
+                                ['Confidence', 'confidence'],
+                                ['Status', 'status'],
+                                ['Created', 'created_at'],
+                              ].map(([label, field]) => (
+                                <TableCell key={field} sortDirection={leadSortBy === field ? leadSortDir : false}>
+                                  <TableSortLabel
+                                    active={leadSortBy === field}
+                                    direction={leadSortBy === field ? leadSortDir : 'asc'}
+                                    onClick={() => handleLeadSort(field as LeadSortField)}
+                                  >
+                                    {label}
+                                  </TableSortLabel>
+                                </TableCell>
+                              ))}
+                              <TableCell align="right">Action</TableCell>
                             </TableRow>
-                          )}
-                        </TableBody>
-                      </Table>
+                          </TableHead>
+                          <TableBody>
+                            {leadResponse.leads.map((lead) => (
+                              <TableRow hover key={lead.id} sx={{ cursor: 'pointer' }} onClick={() => openLeadDetails(lead)}>
+                                <TableCell>{lead.company_name ?? '-'}</TableCell>
+                                <TableCell>{buildContactName(lead)}</TableCell>
+                                <TableCell>{lead.role ?? lead.title ?? '-'}</TableCell>
+                                <TableCell>{lead.email ?? '-'}</TableCell>
+                                <TableCell>{lead.phone ?? '-'}</TableCell>
+                                <TableCell>{lead.city ?? '-'}</TableCell>
+                                <TableCell>{lead.country ?? '-'}</TableCell>
+                                <TableCell>{lead.category ?? '-'}</TableCell>
+                                <TableCell>{leadConfidence(lead).toFixed(2)}</TableCell>
+                                <TableCell onClick={(event) => event.stopPropagation()}>
+                                  {lead.archived ? (
+                                    <Typography variant="body2" color="text.secondary">
+                                      Archived
+                                    </Typography>
+                                  ) : (
+                                    <TextField
+                                      select
+                                      size="small"
+                                      variant="standard"
+                                      value={lead.status ?? 'New'}
+                                      onChange={(event) => {
+                                        void handleLeadPatch(
+                                          lead.id,
+                                          { status: event.target.value },
+                                          `Updated lead #${lead.id} status`,
+                                        )
+                                      }}
+                                      sx={{ minWidth: 120 }}
+                                    >
+                                      {leadStatusOptions.map((status) => (
+                                        <MenuItem key={status} value={status}>
+                                          {status}
+                                        </MenuItem>
+                                      ))}
+                                    </TextField>
+                                  )}
+                                </TableCell>
+                                <TableCell>{formatDateTime(lead.created_at)}</TableCell>
+                                <TableCell align="right">
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      void handleArchiveToggle(lead)
+                                    }}
+                                  >
+                                    {lead.archived ? 'Restore' : 'Archive'}
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            {leadResponse.leads.length === 0 && (
+                              <TableRow>
+                                <TableCell colSpan={12}>
+                                  <Typography variant="body2" color="text.secondary">
+                                    No leads match the current filters.
+                                  </Typography>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </Box>
                       <TablePagination
                         component="div"
                         count={leadResponse.total}
@@ -2242,11 +2265,28 @@ function App() {
                         rowsPerPage={leadRowsPerPage}
                         onRowsPerPageChange={handleLeadRowsPerPageChange}
                         rowsPerPageOptions={[10, 25, 50, 100]}
+                        sx={{
+                          flexShrink: 0,
+                          borderTop: '1px solid',
+                          borderColor: 'divider',
+                          bgcolor: 'rgba(10, 16, 28, 0.94)',
+                        }}
                       />
                     </TableContainer>
 
-                    <Paper variant="outlined" sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.02)' }}>
-                      <Stack spacing={1.5}>
+                    <Paper
+                      variant="outlined"
+                      sx={{
+                        p: 2,
+                        bgcolor: 'rgba(255,255,255,0.02)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        minHeight: 0,
+                        height: { xs: 'auto', xl: 'calc(100vh - 360px)' },
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <Stack spacing={1.5} sx={{ minHeight: 0, flex: 1 }}>
                         <Stack direction="row" justifyContent="space-between" spacing={1}>
                           <Box>
                             <Typography variant="h6">Live scrape feed</Typography>
@@ -2277,8 +2317,8 @@ function App() {
 
                         <Divider />
 
-                        <Stack spacing={1.25}>
-                          {liveScrapeFeed.map((lead, index) => (
+                        <Stack spacing={1.25} sx={{ minHeight: 0, flex: 1, overflow: 'auto', pr: 0.5 }}>
+                          {liveScrapeFeedVisible.map((lead, index) => (
                             <Paper key={`${lead.company_name}-${lead.received_at}-${index}`} variant="outlined" sx={{ p: 1.25 }}>
                               <Stack spacing={0.5}>
                                 <Stack direction="row" justifyContent="space-between" spacing={1}>
@@ -2300,6 +2340,20 @@ function App() {
                             </Typography>
                           )}
                         </Stack>
+
+                        {liveScrapeFeed.length > liveScrapeFeedPageSize && (
+                          <Stack direction="row" justifyContent="center" sx={{ pt: 0.5 }}>
+                            <Pagination
+                              size="small"
+                              page={liveScrapeFeedPage}
+                              count={liveScrapeFeedPageCount}
+                              onChange={(_, page) => setLiveScrapeFeedPage(page)}
+                              showFirstButton
+                              showLastButton
+                              color="primary"
+                            />
+                          </Stack>
+                        )}
                       </Stack>
                     </Paper>
                   </Box>

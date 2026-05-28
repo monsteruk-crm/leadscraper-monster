@@ -1,7 +1,7 @@
 # Dashboard
 
 The transition UI now lives in `frontend/` as a React/Vite app served at `/dashboard/`.
-The deployment also redirects the slashless `/dashboard` URL to `/dashboard/` so the Vite base path stays canonical during local `vercel dev` runs.
+The deployment mounts the frontend at `/dashboard` and Vercel's trailing-slash routing normalizes the slashless `/dashboard` URL to `/dashboard/`, which keeps the Vite base path canonical during local `vercel dev` runs.
 The legacy Python dashboard still exists at `/` while the migration is in progress.
 
 The new shell is MUI-based and intentionally feature-shaped:
@@ -23,7 +23,9 @@ The new shell is MUI-based and intentionally feature-shaped:
 - separate city, country, and phone fields in the lead detail drawer
 - created timestamp visible in the table and detail drawer
 - live scrape feed that streams progress and newly found leads during a run
+- live scrape feed paginated in groups of 5 so the panel stays compact
 - lead pagination with server-backed sorting and page size
+- leads table lives in a fixed-height scroll region so the action controls stay visible
 - session drawer and settings dialog
 - embedded `react-terminal` chat panel
 - DB init/reset and export actions exposed in the React UI
@@ -69,6 +71,7 @@ The left navigation now syncs the active tab and scrolls the main content sectio
 - Table shows company, contact, role, email, phone, city, country, category, confidence, status, and created time
 - Column headers drive backend sorting via MUI `TableSortLabel`
 - A live scrape feed beside the table shows progress messages and new leads immediately while `/api/scrape` is running
+- The live scrape feed shows 5 items per page and resets to the newest page when new lead events arrive
 - Clicking a row opens a lead detail drawer
 
 ### Terminal tab

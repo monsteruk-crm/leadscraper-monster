@@ -259,7 +259,7 @@ async def chat(body: ChatRequest):
                 model=cfg.OPENAI_MODEL,
                 messages=messages,
                 stream=True,
-                max_tokens=600,
+                max_completion_tokens=600,
                 temperature=0.4,
             )
             async for chunk in stream:

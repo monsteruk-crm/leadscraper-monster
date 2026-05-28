@@ -43,7 +43,7 @@ async def enrich_lead(
     client: AsyncOpenAI,
     lead: Lead,
     model: str,
-) -> Lead:
+) -> tuple[Lead, Optional[str]]:
     """Enrich a Lead using OpenAI and return the updated Lead.
 
     Fields already populated on the input lead take precedence;
@@ -76,7 +76,7 @@ async def enrich_lead(
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=300,
+            max_completion_tokens=300,
             temperature=0.2,
         )
         raw = response.choices[0].message.content.strip()
@@ -98,11 +98,16 @@ async def enrich_lead(
 
         logger.debug(
             "Enriched '%s' — confidence=%.2f category='%s'",
-            lead.company_name, lead.confidence, lead.category,
+            lead.company_name,
+            lead.confidence,
+            lead.category,
         )
+        return lead, None
     except json.JSONDecodeError as exc:
         logger.warning("OpenAI returned non-JSON for '%s': %s", lead.company_name, exc)
+        return lead, f"OpenAI returned non-JSON for '{lead.company_name}': {exc}"
     except Exception as exc:
         logger.warning("OpenAI enrichment failed for '%s': %s", lead.company_name, exc)
+        return lead, f"OpenAI enrichment failed for '{lead.company_name}': {exc}"
 
-    return lead
+    return lead, None

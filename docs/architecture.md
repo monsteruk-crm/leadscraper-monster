@@ -114,6 +114,12 @@ The system prompt asks the model to:
 - Generate brief `notes`
 - Return structured JSON
 
+If enrichment fails or returns invalid JSON, the scraper emits an SSE `warning`
+event with the exact message so the dashboard can show the error inline while
+continuing the scrape.
+The OpenAI calls now use `max_completion_tokens`, which is required by newer
+models that reject the legacy `max_tokens` parameter.
+
 ### `db/postgres.py`
 Async PostgreSQL layer via `asyncpg`. Uses a module-level connection pool (re-used across warm Vercel invocations).
 

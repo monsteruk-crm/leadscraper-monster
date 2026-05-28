@@ -112,9 +112,9 @@ class LeadScraper:
             logger.debug("fetch_page error for %s: %s", url, exc)
             return None
 
-    async def enrich_lead(self, lead: Lead) -> Lead:
+    async def enrich_lead(self, lead: Lead) -> tuple[Lead, Optional[str]]:
         if not self._openai:
-            return lead
+            return lead, None
         return await _enrich(self._openai, lead, cfg.OPENAI_MODEL)
 
     # ── Streaming pipeline ────────────────────────────────────────────────────
@@ -232,7 +232,12 @@ class LeadScraper:
                         result.leads_discarded += 1
                         continue
 
-                    lead = await self.enrich_lead(lead)
+                    lead, enrichment_warning = await self.enrich_lead(lead)
+                    if enrichment_warning:
+                        yield LeadEvent(
+                            "warning",
+                            {"msg": enrichment_warning},
+                        )
 
                     if lead.confidence < cfg.AI_CONFIDENCE_THRESHOLD:
                         result.leads_discarded += 1

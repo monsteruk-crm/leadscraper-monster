@@ -1,11 +1,5 @@
 {
-  "redirects": [
-    {
-      "source": "/dashboard",
-      "destination": "/dashboard/",
-      "permanent": false
-    }
-  ],
+  "trailingSlash": true,
   "experimentalServices": {
     "frontend": {
       "entrypoint": "frontend",

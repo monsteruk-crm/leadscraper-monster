@@ -1,0 +1,142 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - text: LeadScraper Monster
+        - heading "React dashboard rebuild" [level=6] [ref=e7]
+      - generic [ref=e9]: Checking API
+      - button "Refresh" [ref=e10] [cursor=pointer]
+      - button "Sessions" [ref=e11] [cursor=pointer]
+      - button "Settings" [ref=e12] [cursor=pointer]
+  - generic [ref=e13]:
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - heading "Navigation" [level=6] [ref=e19]
+        - list [ref=e20]:
+          - listitem [ref=e21]:
+            - button "Overview" [ref=e22] [cursor=pointer]:
+              - generic [ref=e24]: Overview
+          - listitem [ref=e25]:
+            - button "Leads" [ref=e26] [cursor=pointer]:
+              - generic [ref=e28]: Leads
+          - listitem [ref=e29]:
+            - button "Terminal" [ref=e30] [cursor=pointer]:
+              - generic [ref=e32]: Terminal
+          - listitem [ref=e33]:
+            - button "Settings" [ref=e34] [cursor=pointer]:
+              - generic [ref=e36]: Settings
+      - generic [ref=e37]:
+        - heading "Runtime stats" [level=6] [ref=e38]
+        - generic [ref=e39]:
+          - generic [ref=e40]:
+            - generic [ref=e41]:
+              - paragraph [ref=e42]: Leads
+              - heading "0" [level=6] [ref=e43]
+            - text: 0 qualified in loaded results
+          - generic [ref=e44]:
+            - generic [ref=e45]:
+              - paragraph [ref=e46]: Sessions
+              - heading "0" [level=6] [ref=e47]
+            - text: Create or load a session
+          - generic [ref=e48]:
+            - generic [ref=e49]:
+              - paragraph [ref=e50]: Runs
+              - heading "0" [level=6] [ref=e51]
+            - text: No completed runs yet
+          - generic [ref=e52]:
+            - generic [ref=e53]:
+              - paragraph [ref=e54]: Visited URLs
+              - heading "0" [level=6] [ref=e55]
+            - text: No crawl history yet
+    - main [ref=e56]:
+      - generic [ref=e58]:
+        - progressbar [ref=e59]
+        - generic [ref=e62]:
+          - generic [ref=e65]:
+            - generic [ref=e66]:
+              - text: Dashboard shell
+              - heading "THE MONSTER LEAD SCRAPER" [level=4] [ref=e67]
+              - paragraph [ref=e68]: The rebuild now reads live health, stats, leads, sessions, runs, and config from the Python API. Export, archive, rename, save, and terminal workflows all call the backend.
+            - generic [ref=e69]:
+              - button "Open settings" [ref=e70] [cursor=pointer]
+              - button "Open sessions" [ref=e71] [cursor=pointer]
+          - separator [ref=e72]
+          - generic [ref=e73]:
+            - generic [ref=e75]:
+              - generic [ref=e76]:
+                - paragraph [ref=e77]: Qualified leads
+                - heading "0" [level=6] [ref=e79]
+              - paragraph [ref=e80]: Loaded rows above confidence threshold
+            - generic [ref=e82]:
+              - generic [ref=e83]:
+                - paragraph [ref=e84]: Low confidence
+                - heading "0" [level=6] [ref=e86]
+              - paragraph [ref=e87]: Needs operator review in current results
+            - generic [ref=e89]:
+              - generic [ref=e90]:
+                - paragraph [ref=e91]: Open sessions
+                - heading "0" [level=6] [ref=e93]
+              - paragraph [ref=e94]: No active session yet
+            - generic [ref=e96]:
+              - generic [ref=e97]:
+                - paragraph [ref=e98]: API health
+                - heading "ERR" [level=6] [ref=e100]
+              - paragraph [ref=e101]: Waiting for API
+        - generic [ref=e102]:
+          - generic [ref=e104]:
+            - generic [ref=e105]:
+              - generic [ref=e106]:
+                - heading "Pipeline overview" [level=6] [ref=e107]
+                - paragraph [ref=e108]: Derived from live config, run history, and the currently loaded lead rows.
+              - generic [ref=e110]: DB pending
+            - generic [ref=e111]:
+              - generic [ref=e113]:
+                - generic [ref=e114]:
+                  - generic [ref=e115]: Search
+                  - paragraph [ref=e117]: "0"
+                - text: Configured keywords available for the next scrape
+              - generic [ref=e119]:
+                - generic [ref=e120]:
+                  - generic [ref=e121]: Fetch
+                  - paragraph [ref=e123]: "0"
+                - text: Pages crawled across recent runs
+              - generic [ref=e125]:
+                - generic [ref=e126]:
+                  - generic [ref=e127]: Enrich
+                  - paragraph [ref=e129]: "0"
+                - text: AI enrichment enabled for qualified rows
+              - generic [ref=e131]:
+                - generic [ref=e132]:
+                  - generic [ref=e133]: Review
+                  - paragraph [ref=e135]: "0"
+                - text: Rows below the current confidence threshold
+            - generic [ref=e137]:
+              - heading "Current focus" [level=6] [ref=e138]
+              - paragraph [ref=e139]: No session is active. Create one from the drawer or terminal.
+          - generic [ref=e141]:
+            - heading "Terminal" [level=6] [ref=e142]
+            - paragraph [ref=e143]: Primary chat input for the AI assistant. Plain text goes to chat, while explicit commands stay available for operator actions.
+            - generic [ref=e144]:
+              - generic [ref=e146]: Ready
+              - paragraph [ref=e147]: Ready
+            - generic [ref=e155]:
+              - generic [ref=e156]: LeadScraper Monster terminal. Type a normal message to chat with the AI, or type help to inspect available commands.
+              - text: monster
+        - generic [ref=e158]:
+          - tablist [ref=e161]:
+            - tab "Overview" [selected] [ref=e162] [cursor=pointer]
+            - tab "Leads" [ref=e163] [cursor=pointer]
+            - tab "Terminal" [ref=e164] [cursor=pointer]
+            - tab "Settings" [ref=e165] [cursor=pointer]
+          - generic [ref=e167]:
+            - alert [ref=e168]:
+              - img [ref=e170]
+              - generic [ref=e172]: Loading dashboard data...
+            - generic [ref=e174]:
+              - heading "Current session history" [level=6] [ref=e175]
+              - paragraph [ref=e176]: No active session selected.
+              - paragraph [ref=e177]: No turns yet.
+            - generic [ref=e179]:
+              - heading "Recent runs" [level=6] [ref=e180]
+              - paragraph [ref=e181]: "Live scrape history from `GET /api/runs`."
+              - paragraph [ref=e182]: No runs recorded yet.
