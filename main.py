@@ -107,13 +107,16 @@ Context:
 - You are embedded in a web UI (not a terminal)
 - Ignore scrape summaries stored in session history unless the user is explicitly asking about a scrape result
 - For an explicit web-search request, actually search the web instead of asking unnecessary follow-up questions
-- Prefer the current user message over older topics; only use prior chat context when the latest message is clearly referential
+- Preserve normal conversational memory.
+- Keep search-derived turns isolated from normal chat memory.
+- Only reuse prior search context when the latest message clearly refers back to a previous search.
 
 When scrape results appear in the conversation, refer to them concretely.
 Be concise, strategic, and actionable. Avoid generic advice."""
 
 MAX_CONTEXT_TURNS = 8
 MAX_SEARCH_CONTEXT_TURNS = 4
+MAX_SEARCH_SUMMARY_TURNS = 2
 REFERENTIAL_MARKERS = (
     "same",
     "also",
@@ -138,13 +141,29 @@ def _requires_web_search(message: str) -> bool:
         phrase in text
         for phrase in (
             "search the web",
+            "search the internet",
             "look on the web",
+            "check the web",
+            "check online",
             "look up",
             "find online",
             "search online",
+            "google",
+            "bing",
             "find any email",
             "find email address",
             "find email addresses",
+            "find contact",
+            "find contacts",
+            "current information",
+            "latest information",
+            "current news",
+            "latest news",
+            "current details",
+            "latest details",
+            "look into the previous search result",
+            "based on the web search",
+            "from the search results",
         )
     )
 
@@ -154,21 +173,31 @@ def _is_referential_follow_up(message: str) -> bool:
     return any(marker in text for marker in REFERENTIAL_MARKERS)
 
 
-def _build_chat_input(turns: list[dict], current_message: str, needs_web_search: bool):
-    chat_turns = [
-        {"role": turn["role"], "content": turn["content"]}
+def _turn_payload(turn: dict) -> dict:
+    return {"role": turn["role"], "content": turn["content"]}
+
+
+def _build_normal_chat_context(turns: list[dict]) -> list[dict]:
+    return [
+        _turn_payload(turn)
         for turn in turns
         if turn.get("mode") == "chat" and turn.get("role") in {"user", "assistant"}
-    ]
+    ][-MAX_CONTEXT_TURNS:]
 
-    if not chat_turns:
-        return current_message
 
-    if needs_web_search and not _is_referential_follow_up(current_message):
-        return current_message
+def _build_search_context(turns: list[dict], current_message: str, referential: bool) -> list[dict]:
+    context = _build_normal_chat_context(turns)[-MAX_SEARCH_CONTEXT_TURNS:]
 
-    limit = MAX_SEARCH_CONTEXT_TURNS if needs_web_search else MAX_CONTEXT_TURNS
-    return chat_turns[-limit:] + [{"role": "user", "content": current_message}]
+    if referential:
+        search_turns = [
+            _turn_payload(turn)
+            for turn in turns
+            if turn.get("mode") == "search" and turn.get("role") in {"user", "assistant"}
+        ][-MAX_SEARCH_SUMMARY_TURNS:]
+        context.extend(search_turns)
+
+    context.append({"role": "user", "content": current_message})
+    return context
 
 def _json_serial(obj):
     import datetime
@@ -288,26 +317,31 @@ async def chat(body: ChatRequest):
 
     session_id = await _resolve_session(body.session_id)
     turns = await db.get_turns(session_id)
+    needs_web_search = _requires_web_search(body.message)
+    referential_search = _is_referential_follow_up(body.message)
+    turn_mode = "search" if needs_web_search else "chat"
 
-    await db.add_turn(session_id, "user", body.message, "chat")
+    await db.add_turn(session_id, "user", body.message, turn_mode)
 
     client = AsyncOpenAI(api_key=cfg.OPENAI_API_KEY)
     full_reply = []
 
     async def sse_stream():
         try:
-            needs_web_search = _requires_web_search(body.message)
-            input_payload = _build_chat_input(turns, body.message, needs_web_search)
-            tool_config = {"type": "web_search", "search_context_size": "medium"}
+            if needs_web_search:
+                input_payload = _build_search_context(turns, body.message, referential_search)
+            else:
+                input_payload = _build_normal_chat_context(turns) + [{"role": "user", "content": body.message}]
             request_kwargs = {
                 "model": cfg.OPENAI_MODEL,
                 "instructions": _SYSTEM_PROMPT,
                 "input": input_payload,
-                "tools": [tool_config],
                 "max_output_tokens": 600,
                 "temperature": 0.4,
             }
             if needs_web_search:
+                tool_config = {"type": "web_search", "search_context_size": "medium"}
+                request_kwargs["tools"] = [tool_config]
                 request_kwargs["tool_choice"] = {
                     "type": "allowed_tools",
                     "mode": "required",
@@ -330,7 +364,7 @@ async def chat(body: ChatRequest):
             return
 
         reply_text = "".join(full_reply)
-        await db.add_turn(session_id, "assistant", reply_text, "chat")
+        await db.add_turn(session_id, "assistant", reply_text, turn_mode)
         yield f"data: {json.dumps({'type':'done','session_id':session_id})}\n\n"
 
     return StreamingResponse(sse_stream(), media_type="text/event-stream")

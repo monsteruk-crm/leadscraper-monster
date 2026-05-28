@@ -37,7 +37,7 @@ frontend/                    │     ├── scraper/enricher.py  OpenAI enric
 - Redirects `GET /` to `GET /dashboard/`
 - All REST endpoints under `/api/`
 - SSE streaming for `/api/chat` and `/api/scrape`
-- OpenAI chat assistant (LeadBot) backed by the Responses API with web search enabled; normal chat keeps a short recent chat history, while explicit new web-search requests force the web-search tool and run without older context unless the user is clearly continuing the same search
+- OpenAI chat assistant (LeadBot) backed by the Responses API with web search enabled; normal chat keeps recent `chat` turns, explicit web-search requests use isolated `search` turns, and referential search follow-ups may reuse only the latest search summary
 - `_resolve_session(session_id)` — validates the session exists before use; falls back to the latest session or creates a new one (prevents FK violations after Reset DB)
 
 ### `scraper/models.py`
@@ -135,7 +135,7 @@ If the target PostgreSQL instance cannot create `pg_trgm` or the semantic-histor
 | Table | Purpose |
 |---|---|
 | `sessions` | Chat sessions |
-| `chat_turns` | Conversation turns per session (role, content, mode) |
+| `chat_turns` | Conversation turns per session (`mode` values: `chat`, `search`, `scrape`) |
 | `leads` | Scraped leads, unique on `dedupe_key` |
 | `visited_urls` | Every URL ever fetched (prevents re-scraping) |
 | `search_runs` | Log of every scrape run with stats |

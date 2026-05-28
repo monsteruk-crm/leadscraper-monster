@@ -105,7 +105,7 @@ The new React dashboard uses this endpoint as its first live API check.
 ### Chat
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/chat` | Stream LeadBot reply as SSE tokens via the OpenAI Responses API with web search enabled; normal chat keeps a short recent history, while explicit new web-search requests are treated as standalone unless they clearly continue the same search |
+| `POST` | `/api/chat` | Stream LeadBot reply as SSE tokens via the OpenAI Responses API; normal chat keeps recent `chat` turns, explicit web-search requests use isolated `search` turns, and referential search follow-ups can reuse only the latest search summary |
 
 ### Scrape
 | Method | Path | Description |
@@ -180,3 +180,5 @@ Plain text in the terminal is treated as chat. Commands must start with `/`.
 | `/scrape kw1, kw2` | Run scraper with given keywords |
 
 `/new` creates a fresh backend session and clears the visible terminal/session-history view so the next exchange starts as a new conversation.
+
+Session history now uses `mode` values of `chat`, `search`, and `scrape` so the UI can show search-derived turns without mixing them into normal chat memory.
