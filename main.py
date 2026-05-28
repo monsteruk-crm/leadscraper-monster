@@ -22,6 +22,7 @@ from pydantic import BaseModel
 import config.config as cfg
 import db.postgres as db
 from scraper.scraper import LeadScraper
+from scraper.sources import available_sources
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
@@ -87,7 +88,7 @@ You help the user:
 - Understand industry signals, company categories, and contact hierarchies
 
 Context:
-- Pipeline: DuckDuckGo -> aiohttp -> BeautifulSoup4 -> OpenAI enrichment -> PostgreSQL
+- Pipeline: DuckDuckGo/Brave/Nominatim -> aiohttp -> BeautifulSoup4 -> OpenAI enrichment -> PostgreSQL
 - Lead schema: company_name, website, country, city, contact_name, role, email,
   phone, source_url, category, size_signals, notes, confidence, status, owner,
   last_touch, opt_out
@@ -285,12 +286,15 @@ async def scrape(body: ScrapeRequest):
     async def sse_stream():
         run_id = None
         pages_visited = leads_new = leads_duplicate = leads_discarded = 0
+        sources = available_sources()
 
         try:
             visited = await db.get_visited_urls()
             existing_keys = await db.get_dedupe_keys()
-            run_id = await db.start_run(session_id, keywords)
-            search_offsets = {keyword: await db.get_search_progress(keyword) for keyword in keywords}
+            run_id = await db.start_run(session_id, keywords, sources)
+            search_offsets = {
+                keyword: await db.get_search_progress(keyword) for keyword in keywords
+            }
         except Exception as exc:
             yield f"data: {json.dumps({'type':'error','content':f'DB init failed: {exc}'})}\n\n"
             return
@@ -302,8 +306,13 @@ async def scrape(body: ScrapeRequest):
         async def on_progress(rid, pages, new):
             await db.update_run_progress(rid, pages, new)
 
-        async def on_search_progress(keyword: str, next_page: int):
-            await db.set_search_progress(keyword, next_page)
+        async def on_search_progress(
+            keyword: str,
+            source: str,
+            next_page: int,
+            exhausted: bool,
+        ):
+            await db.set_search_progress(keyword, source, next_page, exhausted)
 
         kw_str = ", ".join(keywords)
         await db.add_turn(session_id, "user", f"/scrape {kw_str}", "scrape")

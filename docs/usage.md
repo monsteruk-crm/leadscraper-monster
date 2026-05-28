@@ -25,6 +25,8 @@ npm install -g vercel
 #    OPENAI_API_KEY=sk-...
 #    OPENAI_MODEL=gpt-4o-mini   # optional
 #    LEADS_PAGE_SIZE=25         # optional
+#    BRAVE_SEARCH_API_KEY=...   # optional, enables Brave connector
+#    SEARCH_SOURCES=duckduckgo,brave,nominatim
 
 # 5. Run locally — mirrors the production serverless environment
 vercel dev -L
@@ -130,7 +132,7 @@ The new React dashboard uses this endpoint as its first live API check.
 - `status`
 - `category`
 
-Repeated `/api/scrape` runs with the same keyword now resume from a deeper DuckDuckGo results page instead of starting again from page 1, until the result set is exhausted and the cursor resets.
+Repeated `/api/scrape` runs with the same keyword now resume per source. DuckDuckGo and Brave continue from their last stored result page independently, while one-shot sources such as Nominatim are marked exhausted after their website-tag batch has been consumed.
 
 ### Stats & Runs
 | Method | Path | Description |

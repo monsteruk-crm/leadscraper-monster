@@ -9,6 +9,7 @@ Tables:
   leads         — scraped leads (unique on dedupe_key)
   visited_urls  — every URL ever fetched
   search_runs   — log of every scrape run
+  search_progress — persisted per-keyword, per-source resume cursors
   settings      — single-row configuration (id=1)
 """
 
@@ -148,6 +149,7 @@ CREATE TABLE IF NOT EXISTS search_runs (
     id               SERIAL PRIMARY KEY,
     session_id       INTEGER,
     keywords         JSONB NOT NULL DEFAULT '[]',
+    sources          JSONB NOT NULL DEFAULT '[]',
     pages_crawled    INTEGER DEFAULT 0,
     leads_new        INTEGER DEFAULT 0,
     leads_duplicate  INTEGER DEFAULT 0,
@@ -157,11 +159,14 @@ CREATE TABLE IF NOT EXISTS search_runs (
 );
 
 CREATE TABLE IF NOT EXISTS search_progress (
-    keyword          TEXT PRIMARY KEY,
+    keyword          TEXT NOT NULL,
+    source           TEXT NOT NULL DEFAULT 'duckduckgo',
     next_page        INTEGER NOT NULL DEFAULT 0,
+    exhausted        BOOLEAN NOT NULL DEFAULT false,
     updated_at       TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_search_progress_updated ON search_progress(updated_at);
+CREATE INDEX IF NOT EXISTS idx_search_progress_keyword ON search_progress(keyword);
 
 CREATE TABLE IF NOT EXISTS settings (
     id                      INTEGER PRIMARY KEY DEFAULT 1,
@@ -227,6 +232,24 @@ async def init_db() -> None:
     """Idempotent schema bootstrap.  Safe to call on every startup."""
     async with get_conn() as conn:
         await conn.execute(_DDL)
+        await conn.execute(
+            "ALTER TABLE search_runs ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'"
+        )
+        await conn.execute(
+            "ALTER TABLE search_progress ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'duckduckgo'"
+        )
+        await conn.execute(
+            "ALTER TABLE search_progress ADD COLUMN IF NOT EXISTS exhausted BOOLEAN NOT NULL DEFAULT false"
+        )
+        await conn.execute(
+            "UPDATE search_progress SET source = 'duckduckgo' WHERE source IS NULL OR source = ''"
+        )
+        await conn.execute(
+            "ALTER TABLE search_progress DROP CONSTRAINT IF EXISTS search_progress_pkey"
+        )
+        await conn.execute(
+            "ALTER TABLE search_progress ADD CONSTRAINT search_progress_pkey PRIMARY KEY (keyword, source)"
+        )
     logger.info("Database schema initialised.")
 
 
@@ -609,11 +632,21 @@ async def get_visited_count() -> int:
 
 # ── Search runs ───────────────────────────────────────────────────────────────
 
-async def start_run(session_id: Optional[int], keywords: list[str]) -> int:
+async def start_run(
+    session_id: Optional[int],
+    keywords: list[str],
+    sources: list[str],
+) -> int:
     async with get_conn() as conn:
         row = await conn.fetchrow(
-            "INSERT INTO search_runs (session_id, keywords) VALUES ($1, $2) RETURNING id",
-            session_id, json.dumps(keywords),
+            """
+            INSERT INTO search_runs (session_id, keywords, sources)
+            VALUES ($1, $2, $3)
+            RETURNING id
+            """,
+            session_id,
+            json.dumps(keywords),
+            json.dumps(sources),
         )
         return row["id"]
 
@@ -642,27 +675,45 @@ async def finish_run(
         """, pages_crawled, leads_new, leads_duplicate, leads_discarded, run_id)
 
 
-async def get_search_progress(keyword: str) -> int:
+async def get_search_progress(keyword: str) -> dict[str, dict[str, Any]]:
     async with get_conn() as conn:
-        value = await conn.fetchval(
-            "SELECT next_page FROM search_progress WHERE keyword = $1",
+        rows = await conn.fetch(
+            """
+            SELECT source, next_page, exhausted
+            FROM search_progress
+            WHERE keyword = $1
+            """,
             keyword,
         )
-        return int(value or 0)
+        progress: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            progress[row["source"]] = {
+                "next_page": int(row["next_page"] or 0),
+                "exhausted": bool(row["exhausted"]),
+            }
+        return progress
 
 
-async def set_search_progress(keyword: str, next_page: int) -> None:
+async def set_search_progress(
+    keyword: str,
+    source: str,
+    next_page: int,
+    exhausted: bool = False,
+) -> None:
     async with get_conn() as conn:
         await conn.execute(
             """
-            INSERT INTO search_progress (keyword, next_page, updated_at)
-            VALUES ($1, $2, NOW())
-            ON CONFLICT (keyword) DO UPDATE SET
+            INSERT INTO search_progress (keyword, source, next_page, exhausted, updated_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (keyword, source) DO UPDATE SET
                 next_page = EXCLUDED.next_page,
+                exhausted = EXCLUDED.exhausted,
                 updated_at = NOW()
             """,
             keyword,
+            source,
             max(0, int(next_page)),
+            bool(exhausted),
         )
 
 
@@ -675,6 +726,7 @@ async def list_runs(limit: int = 50) -> list[dict]:
         for r in rows:
             d = dict(r)
             kw = d.get("keywords")
+            src = d.get("sources")
             if isinstance(kw, str):
                 try:
                     d["keywords"] = json.loads(kw)
@@ -682,6 +734,13 @@ async def list_runs(limit: int = 50) -> list[dict]:
                     d["keywords"] = [kw]
             elif kw is None:
                 d["keywords"] = []
+            if isinstance(src, str):
+                try:
+                    d["sources"] = json.loads(src)
+                except Exception:
+                    d["sources"] = [src]
+            elif src is None:
+                d["sources"] = []
             result.append(d)
         return result
 

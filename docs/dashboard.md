@@ -19,7 +19,7 @@ The new shell is MUI-based and intentionally feature-shaped:
 - filter chips for country, status, and category
 - editable lead status from the table and detail drawer
 - editable lead notes in the detail drawer
-- separate city and country fields in the lead detail drawer
+- separate city, country, and phone fields in the lead detail drawer
 - created timestamp visible in the table and detail drawer
 - live scrape feed that streams progress and newly found leads during a run
 - lead pagination with server-backed sorting and page size
@@ -65,7 +65,7 @@ The left navigation now syncs the active tab and scrolls the main content sectio
 - Archive toggle calls `PATCH /api/leads/{id}/archive`
 - Status select calls `PATCH /api/leads/{id}`
 - Export button opens `GET /api/leads/export`
-- Table shows company, contact, role, email, city, country, category, confidence, status, and created time
+- Table shows company, contact, role, email, phone, city, country, category, confidence, status, and created time
 - Column headers drive backend sorting via MUI `TableSortLabel`
 - A live scrape feed beside the table shows progress messages and new leads immediately while `/api/scrape` is running
 - Clicking a row opens a lead detail drawer
@@ -115,7 +115,7 @@ Settings now reads and writes the live config via:
 - Decide whether live scrape feed history should persist per session or remain an in-memory operator view only
 - Add server-side filter option lists so country/status/category chips are not limited to values present on the current page
 - Normalize stored country values consistently (for example `GB` -> `United Kingdom`) so filters and exports stay coherent
-- Show the current DuckDuckGo result-page cursor in the live scrape feed so operators can see how deep a repeated search has progressed
+- Show per-source resume cursors in the live scrape feed so operators can see how deep repeated searches have progressed across DuckDuckGo and Brave
 
 ## Live data boundary
 

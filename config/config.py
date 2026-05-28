@@ -18,6 +18,30 @@ def _get_int_env(name: str, default: int) -> int:
     except ValueError:
         return default
 
+
+def _get_float_env(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _get_bool_env(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _get_list_env(name: str, default: list[str]) -> list[str]:
+    value = os.environ.get(name, "")
+    if not value.strip():
+        return default
+    return [part.strip() for part in value.split(",") if part.strip()]
+
 # ── OpenAI ───────────────────────────────────────────────────────────────────
 OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
@@ -30,10 +54,22 @@ SEARCH_KEYWORDS: list[str] = [
     "green packaging company UK",
 ]
 MAX_PAGES: int = 3
+SEARCH_SOURCES: list[str] = _get_list_env(
+    "SEARCH_SOURCES",
+    ["bing", "duckduckgo", "brave", "nominatim"],
+)
+BRAVE_SEARCH_API_KEY: str = os.environ.get("BRAVE_SEARCH_API_KEY", "")
+BRAVE_RESULTS_PER_PAGE: int = _get_int_env("BRAVE_RESULTS_PER_PAGE", 20)
+NOMINATIM_BASE_URL: str = os.environ.get(
+    "NOMINATIM_BASE_URL",
+    "https://nominatim.openstreetmap.org/search",
+)
+NOMINATIM_LIMIT: int = _get_int_env("NOMINATIM_LIMIT", 10)
+ENABLE_NOMINATIM: bool = _get_bool_env("ENABLE_NOMINATIM", True)
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
-REQUEST_DELAY_SECONDS: float = 1.5
-RESPECT_ROBOTS_TXT: bool = True
+REQUEST_DELAY_SECONDS: float = _get_float_env("REQUEST_DELAY_SECONDS", 1.5)
+RESPECT_ROBOTS_TXT: bool = _get_bool_env("RESPECT_ROBOTS_TXT", True)
 REQUEST_TIMEOUT_SECONDS: int = 15
 
 # ── AI Enrichment ─────────────────────────────────────────────────────────────

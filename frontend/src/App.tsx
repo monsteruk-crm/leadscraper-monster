@@ -2147,6 +2147,7 @@ function App() {
                               ['Contact', 'contact_name'],
                               ['Role', 'role'],
                               ['Email', 'email'],
+                              ['Phone', 'phone'],
                               ['City', 'city'],
                               ['Country', 'country'],
                               ['Category', 'category'],
@@ -2174,6 +2175,7 @@ function App() {
                               <TableCell>{buildContactName(lead)}</TableCell>
                               <TableCell>{lead.role ?? lead.title ?? '-'}</TableCell>
                               <TableCell>{lead.email ?? '-'}</TableCell>
+                              <TableCell>{lead.phone ?? '-'}</TableCell>
                               <TableCell>{lead.city ?? '-'}</TableCell>
                               <TableCell>{lead.country ?? '-'}</TableCell>
                               <TableCell>{lead.category ?? '-'}</TableCell>
@@ -2223,7 +2225,7 @@ function App() {
                           ))}
                           {leadResponse.leads.length === 0 && (
                             <TableRow>
-                              <TableCell colSpan={11}>
+                              <TableCell colSpan={12}>
                                 <Typography variant="body2" color="text.secondary">
                                   No leads match the current filters.
                                 </Typography>

@@ -17,7 +17,7 @@ Browser (React SPA)         Browser (legacy Python UI)
 frontend/                   main.py  ── FastAPI / ASGI ─────────
   │                         │
   └── React/Vite shell      ├── scraper/scraper.py       LeadScraper orchestrator
-                            │     ├── scraper/sources.py   DuckDuckGo search
+                            │     ├── scraper/sources.py   Bing, DuckDuckGo, Brave, Nominatim search
                             │     ├── scraper/parsers.py   HTML parsing, contact extraction
                             │     ├── scraper/enricher.py  OpenAI enrichment
                             │     └── scraper/models.py    Lead + ScrapeResult dataclasses
@@ -85,8 +85,16 @@ Dataclasses shared across all scraper modules.
 **`ScrapeResult`** — aggregates counts for one run: `leads_new`, `leads_duplicate`, `leads_discarded`, `pages_visited`.
 
 ### `scraper/sources.py`
-Searches DuckDuckGo for each keyword and returns candidate URLs.
-Controlled by `cfg.MAX_PAGES` and `cfg.REQUEST_DELAY_SECONDS`.
+Searches enabled sources for each keyword and returns candidate URLs.
+Controlled by `cfg.SEARCH_SOURCES`, `cfg.MAX_PAGES`, and `cfg.REQUEST_DELAY_SECONDS`.
+
+- `duckduckgo` provides the no-key web-search fallback and uses the HTML `GET`
+  endpoint with a browser-like user agent plus a small retry window for
+  temporary 202/429 responses.
+- `bing` is the primary no-key fallback when DuckDuckGo is blocked and
+  decodes Bing redirect URLs back to the target sites.
+- `brave` uses the official Brave Search API when `BRAVE_SEARCH_API_KEY` is set.
+- `nominatim` performs one-shot business/location lookups and extracts website tags from OSM results.
 
 ### `scraper/parsers.py`
 Parses raw HTML into a `Lead`:
@@ -126,7 +134,7 @@ Async PostgreSQL layer via `asyncpg`. Uses a module-level connection pool (re-us
 | `leads` | Scraped leads, unique on `dedupe_key` |
 | `visited_urls` | Every URL ever fetched (prevents re-scraping) |
 | `search_runs` | Log of every scrape run with stats |
-| `search_progress` | Per-keyword DuckDuckGo result-page cursor for resumed searches |
+| `search_progress` | Per-keyword, per-source resume cursor and exhaustion state |
 | `settings` | Single-row config (id=1, singleton constraint) |
 
 Key functions: `init_db()`, `reset_db()`, `_close_pool()`, `insert_lead()`, `get_leads()`, `export_leads_csv()`, `get_stats()`.
@@ -140,18 +148,19 @@ See [configuration.md](configuration.md) for the full variable list.
 
 ## Scraping Pipeline (per keyword)
 
+```text
+for source in enabled_sources:
+    search_source(source, keyword)
+        → [candidate URLs, next source cursor, exhausted?]
+            → fetch_page(url)         [aiohttp, robots.txt check, delay]
+                → parse_lead_info()   [BeautifulSoup4, JSON-LD, mailto/tel]
+                    → enrich_lead()   [OpenAI gpt-4o-mini, structured JSON]
+                        → deduplicate [dedupe_key in existing_keys set]
+                            → on_lead callback → db.insert_lead()
+                                → yield LeadEvent("lead", {...})  [SSE]
 ```
-search_duckduckgo(keyword)
-    → [candidate URLs, next DDG page cursor]
-        → fetch_page(url)         [aiohttp, robots.txt check, delay]
-            → parse_lead_info()   [BeautifulSoup4, JSON-LD, mailto/tel]
-                → enrich_lead()   [OpenAI gpt-4o-mini, structured JSON]
-                    → deduplicate [dedupe_key in existing_keys set]
-                        → on_lead callback → db.insert_lead()
-                            → yield LeadEvent("lead", {...})  [SSE]
 
-The scraper stores the next DuckDuckGo result page per keyword in `search_progress`, so rerunning the same search continues deeper through results instead of starting at page 1 every time.
-```
+The scraper stores the next cursor per `(keyword, source)` in `search_progress`, so rerunning the same search continues deeper through DuckDuckGo and Brave independently while also remembering when one-shot sources such as Nominatim are exhausted.
 
 ## SSE Event Types
 

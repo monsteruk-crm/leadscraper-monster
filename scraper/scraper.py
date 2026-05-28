@@ -25,7 +25,7 @@ import config.config as cfg
 from scraper.enricher import enrich_lead as _enrich
 from scraper.models import Lead, ScrapeResult
 from scraper.parsers import parse_lead_info as _parse
-from scraper.sources import search_duckduckgo
+from scraper.sources import available_sources, search_source
 
 logger = logging.getLogger(__name__)
 
@@ -74,17 +74,28 @@ class LeadScraper:
 
     # ── Public step functions ─────────────────────────────────────────────────
 
-    async def search_sites(self, keywords: str, start_page: int = 0) -> tuple[list[str], int]:
-        logger.info("Searching: %r from page %d", keywords, start_page + 1)
-        urls, next_page = await search_duckduckgo(
-            self._session,
+    async def search_sites(
+        self,
+        source: str,
+        keywords: str,
+        start_page: int = 0,
+    ):
+        logger.info(
+            "Searching %s: %r from page %d",
+            source,
             keywords,
+            max(0, start_page) + 1,
+        )
+        batch = await search_source(
+            self._session,
+            source=source,
+            query=keywords,
             max_pages=cfg.MAX_PAGES,
             delay=cfg.REQUEST_DELAY_SECONDS,
             start_page=start_page,
         )
-        logger.info("Found %d candidate URLs", len(urls))
-        return urls, next_page
+        logger.info("%s returned %d candidate URLs", source, len(batch.urls))
+        return batch
 
     async def fetch_page(self, url: str) -> Optional[str]:
         if cfg.RESPECT_ROBOTS_TXT and not await self._robots_allowed(url):
@@ -129,8 +140,8 @@ class LeadScraper:
             existing_keys:    Pre-loaded set of known dedupe keys.
             on_lead:          Async callback called with (lead, session_id) after save.
             on_progress:      Async callback called with (run_id, pages, new_leads).
-            search_offsets:   Persisted DDG result-page cursor per keyword.
-            on_search_progress: Async callback called with (keyword, next_page).
+            search_offsets:   Persisted source-specific cursor state per keyword.
+            on_search_progress: Async callback called with (keyword, source, next_page, exhausted).
             target_new_leads: Stop early once this many new leads are found (0 = off).
             run_id:           DB run record id.
             session_id:       Current session id.
@@ -138,99 +149,137 @@ class LeadScraper:
         result = ScrapeResult()
         seen_this_run: set[str] = set()
         target_reached = False
+        sources = available_sources()
 
         for kw in keywords:
             if target_reached:
                 break
 
-            start_page = search_offsets.get(kw, 0)
-            search_msg = f"Searching: {kw}"
-            if start_page > 0:
-                search_msg += f" (resuming from results page {start_page + 1})"
-            yield LeadEvent("progress", {"msg": search_msg, "phase": "search"})
+            keyword_offsets = search_offsets.setdefault(kw, {})
 
-            try:
-                urls, next_page = await self.search_sites(kw, start_page=start_page)
-                search_offsets[kw] = next_page
-                await on_search_progress(kw, next_page)
-            except Exception as exc:
-                yield LeadEvent("error", {"msg": f"Search failed for '{kw}': {exc}"})
-                continue
-
-            yield LeadEvent("progress", {
-                "msg": f"Found {len(urls)} candidate URLs for '{kw}'",
-                "phase": "fetch",
-            })
-
-            for url in urls:
-                if target_new_leads > 0 and result.leads_new >= target_new_leads:
-                    target_reached = True
+            for source in sources:
+                if target_reached:
                     break
 
-                if url in visited:
+                source_state = keyword_offsets.get(
+                    source,
+                    {"next_page": 0, "exhausted": False},
+                )
+                start_page = int(source_state.get("next_page", 0))
+                exhausted = bool(source_state.get("exhausted", False))
+
+                if exhausted:
+                    yield LeadEvent(
+                        "progress",
+                        {
+                            "msg": f"Skipping {source} for '{kw}' (source exhausted)",
+                            "phase": "search",
+                        },
+                    )
                     continue
 
-                html = await self.fetch_page(url)
-                visited.add(url)
+                search_msg = f"Searching via {source}: {kw}"
+                if start_page > 0:
+                    search_msg += f" (resuming from results page {start_page + 1})"
+                yield LeadEvent("progress", {"msg": search_msg, "phase": "search"})
 
-                if html is None:
-                    continue
-
-                result.pages_visited += 1
-
-                lead = _parse(html, url)
-                if lead is None:
-                    result.leads_discarded += 1
-                    continue
-
-                lead = await self.enrich_lead(lead)
-
-                if lead.confidence < cfg.AI_CONFIDENCE_THRESHOLD:
-                    result.leads_discarded += 1
-                    continue
-
-                key = lead.dedupe_key
-                if key in existing_keys or key in seen_this_run:
-                    result.leads_duplicate += 1
-                    continue
-
-                seen_this_run.add(key)
-                existing_keys.add(key)
-                result.leads.append(lead)
-                result.leads_new += 1
-
-                # Persist via callback — emit a warning event on failure
-                # so the blank-table bug is visible instead of silent.
-                db_save_ok = True
                 try:
-                    await on_lead(lead, session_id)
+                    batch = await self.search_sites(source, kw, start_page=start_page)
+                    keyword_offsets[source] = {
+                        "next_page": batch.next_page,
+                        "exhausted": batch.exhausted,
+                    }
+                    await on_search_progress(
+                        kw,
+                        source,
+                        batch.next_page,
+                        batch.exhausted,
+                    )
                 except Exception as exc:
-                    logger.warning("on_lead callback failed: %s", exc)
-                    db_save_ok = False
-                    yield LeadEvent("warning", {
-                        "msg": f"DB save failed for '{lead.company_name}': {exc}"
-                    })
+                    yield LeadEvent(
+                        "error",
+                        {"msg": f"Search failed for '{kw}' via {source}: {exc}"},
+                    )
+                    continue
 
-                # Yield SSE event for real-time streaming
-                yield LeadEvent("lead", {
-                    "company_name": lead.company_name,
-                    "first_name": lead.first_name or "",
-                    "last_name": lead.last_name or "",
-                    "email": lead.email or "",
-                    "phone": lead.phone or "",
-                    "website": lead.website,
-                    "category": lead.category,
-                    "confidence": lead.confidence,
-                    "country": lead.country,
-                    "city": lead.city,
-                })
+                urls = batch.urls
+                yield LeadEvent(
+                    "progress",
+                    {
+                        "msg": f"{source} found {len(urls)} candidate URLs for '{kw}'",
+                        "phase": "fetch",
+                    },
+                )
 
-                # Update run progress in DB
-                if run_id is not None:
+                for url in urls:
+                    if target_new_leads > 0 and result.leads_new >= target_new_leads:
+                        target_reached = True
+                        break
+
+                    if url in visited:
+                        continue
+
+                    html = await self.fetch_page(url)
+                    visited.add(url)
+
+                    if html is None:
+                        continue
+
+                    result.pages_visited += 1
+
+                    lead = _parse(html, url)
+                    if lead is None:
+                        result.leads_discarded += 1
+                        continue
+
+                    lead = await self.enrich_lead(lead)
+
+                    if lead.confidence < cfg.AI_CONFIDENCE_THRESHOLD:
+                        result.leads_discarded += 1
+                        continue
+
+                    key = lead.dedupe_key
+                    if key in existing_keys or key in seen_this_run:
+                        result.leads_duplicate += 1
+                        continue
+
+                    seen_this_run.add(key)
+                    existing_keys.add(key)
+                    result.leads.append(lead)
+                    result.leads_new += 1
+
                     try:
-                        await on_progress(run_id, result.pages_visited, result.leads_new)
-                    except Exception:
-                        pass
+                        await on_lead(lead, session_id)
+                    except Exception as exc:
+                        logger.warning("on_lead callback failed: %s", exc)
+                        yield LeadEvent(
+                            "warning",
+                            {
+                                "msg": f"DB save failed for '{lead.company_name}': {exc}"
+                            },
+                        )
+
+                    yield LeadEvent(
+                        "lead",
+                        {
+                            "company_name": lead.company_name,
+                            "first_name": lead.first_name or "",
+                            "last_name": lead.last_name or "",
+                            "email": lead.email or "",
+                            "phone": lead.phone or "",
+                            "website": lead.website,
+                            "category": lead.category,
+                            "confidence": lead.confidence,
+                            "country": lead.country,
+                            "city": lead.city,
+                        },
+                    )
+
+                    if run_id is not None:
+                        try:
+                            await on_progress(run_id, result.pages_visited, result.leads_new)
+                        except Exception:
+                            pass
 
         result.leads = []  # already persisted via on_lead callback
 
